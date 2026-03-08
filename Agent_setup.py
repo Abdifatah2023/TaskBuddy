@@ -19,7 +19,7 @@ load_dotenv()
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 
 # 2. Define your Mock Data path (Update 'MyProjectFolder' to your actual folder name)
-mock_data_path = r"C:\Users\abdif\OneDrive\Documents\TaskBuddy\Syllabi\Syllabus2.pdf"
+mock_data_path = r"C:\Users\Owner\Documents\TaskBuddy\Syllabi\Syllabus2.pdf"
 
 
 # Initialize the loader with the path to your PDF file
