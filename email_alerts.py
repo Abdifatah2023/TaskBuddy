@@ -40,7 +40,7 @@ def authenticate():
     # Save the credentials for the next run
     with open("token.json", "w") as token:
       token.write(creds.to_json())
-    return creds
+  return creds
 
 def get_weekly_events(creds):
   """Fetch events from calendar for the week"""
@@ -61,7 +61,7 @@ def get_weekly_events(creds):
     return events_result.get("items", [])
   
   except HttpError as error:
-    print("Error: {error}")
+    print(f"Error: {error}")
     return None
 
 def format_event(events):
@@ -70,10 +70,10 @@ def format_event(events):
   
   bulletin_lines = ["Weekly bulletin:\n"]
   for event in events:
-    start = event[start].get("dateTime", event["start"].get("date"))
+    start = event["start"].get("dateTime", event["start"].get("date"))
     start_dt = datetime.datetime.fromisoformat(start.replace('Z', '+00:00'))
     formatted_date = start_dt.strftime("%A, %B, %d")
-    line = f"- {event['summary']} (Due: {formatted_date})"
+    line = f"- {event.get('summary', 'Untitled event')} (Due: {formatted_date})"
     bulletin_lines.append(line)
 
   return "\n".join(bulletin_lines)
