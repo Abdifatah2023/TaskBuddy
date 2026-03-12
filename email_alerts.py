@@ -41,17 +41,54 @@ def authenticate():
     with open("token.json", "w") as token:
       token.write(creds.to_json())
     return creds
+
+def get_weekly_events(creds):
+  """Fetch events from calendar for the week"""
+  try:
+    service = build("calendar", "v3", credentials=creds)
+    now = datetime.datetime.utcnow().isoformat()+"Z"
+    end_time = (datetime.datetime.utcnow() + datetime.timedelta(days=7)).isoformat() + "Z"
+    events_result = (
+      service.events().list(
+        calendarId="primary",
+        timeMin=now,
+        timeMax=end_time,
+        singleEvents=True,
+        orderBy="startTime",
+      )
+      .execute()
+    )
+    return events_result.get("items", [])
   
+  except HttpError as error:
+    print("Error: {error}")
+    return None
+
+def format_event(events):
+  if not events:
+    return "No upcoming deadlines/events for the next 7 days"
+  
+  bulletin_lines = ["Weekly bulletin:\n"]
+  for event in events:
+    start = event[start].get("dateTime", event["start"].get("date"))
+    start_dt = datetime.datetime.fromisoformat(start.replace('Z', '+00:00'))
+    formatted_date = start_dt.strftime("%A, %B, %d")
+    line = f"- {event['summary']} (Due: {formatted_date})"
+    bulletin_lines.append(line)
+
+  return "\n".join(bulletin_lines)
+
 # Send message
-def gmail_send_message(creds):
+def gmail_send_message(creds, email_body):
   try:
     service = build("gmail", "v1", credentials=creds)
     message = EmailMessage()
-    message.set_content("This is automated draft mail")
+    # message.set_content("This is automated draft mail")
+    message.set_content(email_body) #changed this
 
     message["To"] = "messycanvastahia@gmail.com"
     message["From"] = "messycanvastahia@gmail.com"
-    message["Subject"] = "Automated draft"
+    message["Subject"] = "Weekly Deadlines Bulletin"
 
     #encoded message
     encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
@@ -73,11 +110,13 @@ def main():
 
    #authenticate and get credentials
   creds = authenticate()
-  if not creds:
-    print("Could not authenticate. Exiting.")
-    return
+  
+  weekly_event = get_weekly_events(creds)
+  email_body = format_event(weekly_event)
+  gmail_send_message(creds, email_body) 
 
-  gmail_send_message(creds) 
+  print("\nGenerated Email Body")
+  print(email_body)
   
   print("\nProcess finished. Check your mail")
  
