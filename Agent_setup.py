@@ -12,14 +12,14 @@ from langchain_core.tools import tool
 from langchain.agents import create_agent
 
 from Google_calendar import GoogleCalendarTool
-
+from email_alerts import authenticate, get_weekly_events, format_event, gmail_send_message
 
 # Load environment
 load_dotenv()
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 
 # 2. Define your Mock Data path (Update 'MyProjectFolder' to your actual folder name)
-mock_data_path = r"C:\Users\Owner\Documents\TaskBuddy\Syllabi\Syllabus2.pdf"
+mock_data_path = r"C:\Users\Tahia1\OneDrive\Documents\TaskBuddy\Syllabi\Syllabus2.pdf"
 
 
 # Initialize the loader with the path to your PDF file
@@ -122,7 +122,39 @@ def create_calendar_event(
     )
     return f"Event created for {title} on {due_date}"
     
+@tool
+def extract_weekly_deadlines(query: str) -> str:
+    """
+    Extract upcoming deadlines (next 7 days) from syllabus using RAG.
+    """
+    print("Running extract_weekly_deadlines...")
+    return base_rag_chain.invoke(query)
 
+
+@tool
+def send_weekly_calendar_bulletin(_: str = "send") -> str:
+    """
+    Build and send a weekly bulletin from Google Calendar events using email_alerts.py.
+    """
+    try:
+        print("Running send_weekly_calendar_bulletin...")
+        creds = authenticate()
+        if not creds:
+            return "Failed: could not authenticate."
+
+        events = get_weekly_events(creds)
+        if events is None:
+            return "Failed: could not fetch calendar events."
+
+        email_body = format_event(events)
+        result = gmail_send_message(creds, email_body)
+
+        if result is None:
+            return "Failed: Gmail send returned no result."
+        print("Success: weekly bulletin email sent.")
+        return "Success: weekly bulletin email sent."
+    except Exception as e:
+        return f"Failed with error: {str(e)}"
 
 
 # Agent Setup
@@ -132,7 +164,7 @@ agent_llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
 system_prompt = """
     You are an academic assistant.
 
-    You have two tools:
+    You have four tools:
 
     1. extract_assignments:
     - Use this FIRST to retrieve assignments and deadlines.
@@ -142,11 +174,21 @@ system_prompt = """
     - Use this to create Google Calendar events.
     - Only create events when due_date is NOT null.
 
+    3. extract_weekly_deadlines:
+    - Extracts all the deadlines for the next seven days.
+    - After this tool, you must use send_weekly_calendar_bulletin to send out an email.
+
+    4. send_weekly_calendar_bulletin
+    - follows up extract_weekly_deadlines.
+    - sends an email to the recipient of the upcoming deadlines.
+
     Workflow:
     Step 1: Call extract_assignments.
     Step 2: Parse JSON results.
     Step 3: For each assignment with a valid due_date, call create_calendar_event.
-    Step 4: Summarize what was created.
+    Step 4: Extract upcoming deadlines for the next 7 days by using extract_weekly_deadlines.
+    Step 5: Use send_weekly_calendar_bulletin to send a bulletin email of upcoming deadlines to the recipient.
+    Step 6: Summarize what was created.
 
     Do NOT hallucinate assignments.
 
@@ -154,7 +196,7 @@ system_prompt = """
 
 agent = create_agent(
     model=agent_llm,
-    tools=[extract_assignments, create_calendar_event],
+    tools=[extract_assignments, create_calendar_event, extract_weekly_deadlines, send_weekly_calendar_bulletin],
     system_prompt=system_prompt
 )
 
@@ -170,7 +212,7 @@ response = agent.invoke({
     "messages": [
         {
             "role": "human",
-            "content": "Extract all assignments and create calendar events for them."
+            "content": "Extract all assignments and create calendar events for them. Then extract the upcoming deadlines for the next 7 days and send out the email"
         }
     ]
 })
