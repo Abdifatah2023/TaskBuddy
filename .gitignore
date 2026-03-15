@@ -1,3 +1,7 @@
 .env
-credentials.json
+/credentials
+/Syllabi
 token.json
+Calendar_token.json
+docling_app.py
+__pycache__/

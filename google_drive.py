@@ -1,3 +1,4 @@
+import io
 import os.path
 import time
 
@@ -6,9 +7,10 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaIoBaseDownload
 
 # If modifying these scopes, delete the file token.json.
-SCOPES = ["https://www.googleapis.com/auth/drive.metadata.readonly"]
+SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
 # Set the shared folder ID to monitor.
 # You can find the folder ID in the folder's URL:
@@ -34,6 +36,32 @@ def get_credentials():
         with open("token.json", "w") as token:
             token.write(creds.to_json())
     return creds
+
+
+def get_drive_service():
+    """Returns an authenticated Google Drive API service instance."""
+    return build("drive", "v3", credentials=get_credentials())
+
+
+def download_file_content(service, file_id: str, mime_type: str) -> bytes:
+    """
+    Download a file's content as bytes using chunked streaming.
+    - Google Workspace files (Docs, Sheets, etc.) are exported as PDF.
+    - All other files (PDF, DOCX, DOC) are downloaded as-is.
+    """
+    if mime_type.startswith("application/vnd.google-apps."):
+        request = service.files().export_media(
+            fileId=file_id, mimeType="application/pdf"
+        )
+    else:
+        request = service.files().get_media(fileId=file_id)
+
+    buffer = io.BytesIO()
+    downloader = MediaIoBaseDownload(buffer, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+    return buffer.getvalue()
 
 
 def list_folder_files(service, folder_id):

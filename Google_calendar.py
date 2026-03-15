@@ -69,9 +69,13 @@ def event_exists(service, title, start_iso, end_iso):
 def GoogleCalendarTool(title: str, start_time: str, end_time: str = None):
     creds = None
 
-    # Load token if exists
-    if os.path.exists("token.json"):
-        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+    TOKEN_FILE = "Calendar_token.json"
+
+    # Load token if exists and scopes match
+    if os.path.exists(TOKEN_FILE):
+        creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
+        if not creds.has_scopes(SCOPES):
+            creds = None
 
     # Refresh or authenticate if needed
     if not creds or not creds.valid:
@@ -79,11 +83,11 @@ def GoogleCalendarTool(title: str, start_time: str, end_time: str = None):
             creds.refresh(Request())
         else:
             flow = InstalledAppFlow.from_client_secrets_file(
-                "credentials.json", SCOPES
+                "./credentials/credentials.json", SCOPES
             )
             creds = flow.run_local_server(port=0)
 
-        with open("token.json", "w") as token:
+        with open(TOKEN_FILE, "w") as token:
             token.write(creds.to_json())
 
     try:

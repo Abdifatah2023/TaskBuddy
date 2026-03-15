@@ -1,10 +1,14 @@
+import io
 import os
+import json
+
 from dotenv import load_dotenv
+from pypdf import PdfReader
+from docx import Document
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_community.vectorstores import Chroma
-from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
@@ -12,48 +16,19 @@ from langchain_core.tools import tool
 from langchain.agents import create_agent
 
 from Google_calendar import GoogleCalendarTool
+from google_drive import get_drive_service, list_folder_files, download_file_content, FOLDER_ID
 
 
 # Load environment
 load_dotenv()
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 
-# 2. Define your Mock Data path (Update 'MyProjectFolder' to your actual folder name)
-mock_data_path = r"C:\Users\Owner\Documents\TaskBuddy\Syllabi\Syllabus2.pdf"
 
+# Shared utilities used inside tools
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=500)
 
-# Initialize the loader with the path to your PDF file
-loader = PyPDFLoader(mock_data_path)
+embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
 
-# Load the documents (each page is a separate Document object)
-pages = loader.load()
-
-
-full_text = "\n\n".join([page.page_content for page in pages])
-
-
-# create chunks
-text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1500,
-    chunk_overlap=500,
-)
-chunks = text_splitter.split_text(full_text)
-
-
-# embedding
-embeddings = GoogleGenerativeAIEmbeddings(
-    model = "models/gemini-embedding-001"
-)
-
-# Create a Chroma vector store from the chunks
-vectorstore = Chroma.from_texts(
-    texts=chunks,
-    embedding=embeddings,
-    collection_name="TaskBudy"
-)
-
-
-  # --- Prompt and Generation ---
 template = """You are an academic assistant. 
             Extract every assignment, project, or exam mentioned.
 
@@ -82,95 +57,125 @@ def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
 
 
-base_rag_chain = (
-    {
-        "context": vectorstore.as_retriever(search_kwargs={"k": 5}) | format_docs,
-        "question": RunnablePassthrough(),
-    }
-    | prompt
-    | ChatGoogleGenerativeAI(model="gemini-flash-latest")
-    | StrOutputParser()
-)
+# ── Tools ──────────────────────────────────────────────────────────────────────
 
-
-
-# rag chaing custom tool
 @tool
-def extract_assignments(query: str) -> str:
+def list_drive_syllabi() -> str:
     """
-    Extract assignments and deadlines from syllabus documents.
+    List all syllabus files in the shared Google Drive folder.
+    Returns a JSON list of objects with file_id and file_name.
+    Call this first before extracting assignments.
     """
-    return base_rag_chain.invoke(query)
+    service = get_drive_service()
+    files = list_folder_files(service, FOLDER_ID)
+    result = [{"file_id": fid, "file_name": f["name"]} for fid, f in files.items()]
+    return json.dumps(result)
 
 
-# Google calendar custom tool
 @tool
-def create_calendar_event(
-    title: str,
-    due_date: str 
-) -> str:
-    
+def extract_assignments_from_file(file_id: str, file_name: str) -> str:
     """
-    Create a Google Calendar event for an assignment. 
-    The event should start and end on the due date.
+    Download a syllabus file from Google Drive by its file_id and extract
+    all assignments and deadlines from it.
+    Returns a JSON list of {assignment_name, due_date} objects.
     """
+    service = get_drive_service()
+    meta = service.files().get(fileId=file_id, fields="mimeType").execute()
+    mime_type = meta["mimeType"]
+    file_bytes = download_file_content(service, file_id, mime_type)
 
-    GoogleCalendarTool(
-        title=title, 
-        start_time=due_date, 
-        end_time=due_date
+    DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    DOC  = "application/msword"
+
+    if mime_type in (DOCX, DOC):
+        doc = Document(io.BytesIO(file_bytes))
+        full_text = "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
+    else:
+        # PDF — either native or exported from Google Docs
+        reader = PdfReader(io.BytesIO(file_bytes))
+        full_text = "\n\n".join(page.extract_text() or "" for page in reader.pages)
+
+    if not full_text.strip():
+        return f'[]  # No extractable text found in {file_name}'
+
+    chunks = text_splitter.split_text(full_text)
+    vectorstore = Chroma.from_texts(
+        texts=chunks,
+        embedding=embeddings,
+        collection_name=f"syllabus_{file_id[:8]}",
     )
-    return f"Event created for {title} on {due_date}"
-    
+
+    rag_chain = (
+        {
+            "context": vectorstore.as_retriever(search_kwargs={"k": 5}) | format_docs,
+            "question": RunnablePassthrough(),
+        }
+        | prompt
+        | ChatGoogleGenerativeAI(model="gemini-2.0-flash")
+        | StrOutputParser()
+    )
+
+    return rag_chain.invoke(
+        f"Extract all assignments, projects, and exams with their due dates from: {file_name}"
+    )
 
 
+@tool
+def create_calendar_event(title: str, due_date: str) -> str:
+    """
+    Create a Google Calendar event for an assignment.
+    The event should start and end on the due date.
+    Only call this when due_date is NOT null.
+    """
+    return GoogleCalendarTool(title=title, start_time=due_date, end_time=due_date)
 
-# Agent Setup
+
+# ── Agent Setup ────────────────────────────────────────────────────────────────
 
 agent_llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
 
 system_prompt = """
-    You are an academic assistant.
+    You are an academic assistant that processes syllabus files from Google Drive.
 
-    You have two tools:
+    You have three tools:
 
-    1. extract_assignments:
-    - Use this FIRST to retrieve assignments and deadlines.
-    - It returns structured JSON.
+    1. list_drive_syllabi:
+       - Call this FIRST to discover all syllabus files in the Drive folder.
 
-    2. create_calendar_event:
-    - Use this to create Google Calendar events.
-    - Only create events when due_date is NOT null.
+    2. extract_assignments_from_file:
+       - Call this for EACH file returned by list_drive_syllabi.
+       - Pass the file_id and file_name for that file.
+       - It returns a JSON list of assignments and due dates.
+
+    3. create_calendar_event:
+       - Call this for each assignment that has a valid (non-null) due_date.
+       - Pass the assignment name as title and the due_date.
 
     Workflow:
-    Step 1: Call extract_assignments.
-    Step 2: Parse JSON results.
-    Step 3: For each assignment with a valid due_date, call create_calendar_event.
-    Step 4: Summarize what was created.
+    Step 1: Call list_drive_syllabi to get all files.
+    Step 2: For each file, call extract_assignments_from_file individually.
+    Step 3: Parse the JSON results from each file.
+    Step 4: For each assignment with a valid due_date, call create_calendar_event.
+    Step 5: Summarize all assignments added to the calendar.
 
-    Do NOT hallucinate assignments.
-
+    Do NOT hallucinate assignments or due dates.
     """
 
 agent = create_agent(
     model=agent_llm,
-    tools=[extract_assignments, create_calendar_event],
-    system_prompt=system_prompt
+    tools=[list_drive_syllabi, extract_assignments_from_file, create_calendar_event],
+    system_prompt=system_prompt,
 )
 
-print("Agent ready with 2 tools!")
-print("="*50)
+print("Agent ready with 3 tools!")
+print("=" * 50)
 
 
-
-
-
-# Invoke the agent
 response = agent.invoke({
     "messages": [
         {
             "role": "human",
-            "content": "Extract all assignments and create calendar events for them."
+            "content": "Scan all syllabus files in the Drive folder, extract every assignment and deadline, and add them to my Google Calendar.",
         }
     ]
 })
