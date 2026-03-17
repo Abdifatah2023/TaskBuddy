@@ -234,27 +234,35 @@ agent_prompt = """
 agent = create_agent(
     model=agent_llm,
     tools=[list_drive_syllabi, extract_assignments_from_file,
-            create_calendar_event, extract_weekly_deadlines, 
+            create_calendar_event, extract_weekly_deadlines,
             send_weekly_calendar_bulletin],
     system_prompt=agent_prompt,
 )
 
-print("Agent ready with 3 tools!")
-print("=" * 50)
+
+def run_agent() -> str:
+    """Run the full agent workflow and return the final summary."""
+    global added_events
+    added_events = []  # reset for each run
+
+    response = agent.invoke({
+        "messages": [
+            {
+                "role": "human",
+                "content": (
+                    "Scan all syllabus files in the Drive folder, "
+                    "extract every assignment and deadline, "
+                    "and add them to my Google Calendar. "
+                    "Then extract the upcoming deadlines for the next 7 days "
+                    "and send out the email."
+                ),
+            }
+        ]
+    })
+    return response["messages"][-1].content
 
 
-response = agent.invoke({
-    "messages": [
-        {
-            "role": "human",
-            "content": '''
-                Scan all syllabus files in the Drive folder, 
-                extract every assignment and deadline, 
-                and add them to my Google Calendar.Then extract the upcoming deadlines for the next 7 days and send out the email
-                ''',
-        }
-    ]
-})
-
-result = response["messages"][-1].content
-print(result)
+if __name__ == "__main__":
+    print("Agent ready!")
+    print("=" * 50)
+    print(run_agent())
