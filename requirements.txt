@@ -1,0 +1,15 @@
+dotenv
+langchain_text_splitters
+langchain_google_genai
+langchain_community
+langchain_community
+langchain_core
+langchain
+datetime
+google-auth 
+google-auth-oauthlib 
+google-api-python-client
+pypdf
+chromadb
+langchain-chroma
+tzdata

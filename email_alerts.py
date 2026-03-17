@@ -19,14 +19,14 @@ SCOPES = [
 ]
 
 # change this to your email address to receive alerts
-recipient_email = "messycanvastahia@gmail.com"
+recipient_email = "shreenat@terpmail.umd.edu"
 
 def authenticate():
   """Handle authentication and returns valid credentials.
   """
   creds = None
   # The file token.json stores the user's access and refresh tokens.
-  if os.path.exists("token.json"):
+  if os.path.exists("email_token.json"):
     creds = Credentials.from_authorized_user_file("token.json", SCOPES)
   # If there are no (valid) credentials available, let the user log in.
   if not creds or not creds.valid:
@@ -38,7 +38,7 @@ def authenticate():
       )
       creds = flow.run_local_server(port=0)
     # Save the credentials for the next run
-    with open("token.json", "w") as token:
+    with open("email_token.json", "w") as token:
       token.write(creds.to_json())
   return creds
 
@@ -86,8 +86,8 @@ def gmail_send_message(creds, email_body):
     # message.set_content("This is automated draft mail")
     message.set_content(email_body) #changed this
 
-    message["To"] = "messycanvastahia@gmail.com"
-    message["From"] = "messycanvastahia@gmail.com"
+    message["To"] = "shreenat@terpmail.umd.edu"
+    message["From"] = "shreenat@terpmail.umd.edu"
     message["Subject"] = "Weekly Deadlines Bulletin"
 
     #encoded message

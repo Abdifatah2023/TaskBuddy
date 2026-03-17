@@ -70,7 +70,7 @@ def GoogleCalendarTool(title: str, start_time: str, end_time: str = None):
     creds = None
 
     # Load token if exists
-    if os.path.exists("token.json"):
+    if os.path.exists("calendar_token.json"):
         creds = Credentials.from_authorized_user_file("token.json", SCOPES)
 
     # Refresh or authenticate if needed
@@ -83,7 +83,7 @@ def GoogleCalendarTool(title: str, start_time: str, end_time: str = None):
             )
             creds = flow.run_local_server(port=0)
 
-        with open("token.json", "w") as token:
+        with open("calendar_token.json", "w") as token:
             token.write(creds.to_json())
 
     try:

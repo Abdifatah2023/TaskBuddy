@@ -1,106 +1,26 @@
 import os
 from dotenv import load_dotenv
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-from langchain_community.vectorstores import Chroma
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
-from langchain_core.output_parsers import StrOutputParser
+
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.tools import tool
 from langchain.agents import create_agent
-
-from Google_calendar import GoogleCalendarTool
+from google_calendar import GoogleCalendarTool
 from email_alerts import authenticate, get_weekly_events, format_event, gmail_send_message
+from rag_chain import rag_chain
 
 # Load environment
 load_dotenv()
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
-
-# 2. Define your Mock Data path (Update 'MyProjectFolder' to your actual folder name)
-mock_data_path = r"C:\Users\Tahia1\OneDrive\Documents\TaskBuddy\Syllabi\Syllabus2.pdf"
-
-
-# Initialize the loader with the path to your PDF file
-loader = PyPDFLoader(mock_data_path)
-
-# Load the documents (each page is a separate Document object)
-pages = loader.load()
-
-
-full_text = "\n\n".join([page.page_content for page in pages])
-
-
-# create chunks
-text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1500,
-    chunk_overlap=500,
-)
-chunks = text_splitter.split_text(full_text)
-
-
-# embedding
-embeddings = GoogleGenerativeAIEmbeddings(
-    model = "models/gemini-embedding-001"
-)
-
-# Create a Chroma vector store from the chunks
-vectorstore = Chroma.from_texts(
-    texts=chunks,
-    embedding=embeddings,
-    collection_name="TaskBudy"
-)
-
-
-  # --- Prompt and Generation ---
-template = """You are an academic assistant. 
-            Extract every assignment, project, or exam mentioned.
-
-            Return output STRICTLY in JSON format like this:
-
-            [
-            {{
-                "assignment_name": "Homework 1",
-                "due_date": "2026-03-10"
-            }}
-            ]
-
-            If a due date is missing, set "due_date" to null
-
-            Context: 
-            {context}
-
-            Question: 
-            {question}
-
-            """
-
-prompt = ChatPromptTemplate.from_template(template)
-
-def format_docs(docs):
-    return "\n\n".join(doc.page_content for doc in docs)
-
-
-base_rag_chain = (
-    {
-        "context": vectorstore.as_retriever(search_kwargs={"k": 5}) | format_docs,
-        "question": RunnablePassthrough(),
-    }
-    | prompt
-    | ChatGoogleGenerativeAI(model="gemini-flash-latest")
-    | StrOutputParser()
-)
-
 
 
 # rag chaing custom tool
 @tool
 def extract_assignments(query: str) -> str:
     """
-    Extract assignments and deadlines from syllabus documents.
+    Extract all assignments or events with deadlines from the syllabus documents.
     """
-    return base_rag_chain.invoke(query)
+    return rag_chain.invoke(query)
 
 
 # Google calendar custom tool
@@ -128,7 +48,7 @@ def extract_weekly_deadlines(query: str) -> str:
     Extract upcoming deadlines (next 7 days) from syllabus using RAG.
     """
     print("Running extract_weekly_deadlines...")
-    return base_rag_chain.invoke(query)
+    return rag_chain.invoke(query)
 
 
 @tool
@@ -156,6 +76,16 @@ def send_weekly_calendar_bulletin(_: str = "send") -> str:
     except Exception as e:
         return f"Failed with error: {str(e)}"
 
+@ tool 
+def study_plan(topic: str) -> str : 
+    """
+    This tool gets any topic and then uses the documents in the RAG pipeline to break down the topic
+    into small sections and subtopics. This can be used by the agent to break down a task and create a
+    study schedule for the user.
+    """
+    result = rag_chain.invoke(f'I need to study for an exam on {topic}. Can you break it apart into smaller sections or subtopics big enough to study in a day?')
+    return result
+
 
 # Agent Setup
 
@@ -164,7 +94,7 @@ agent_llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
 system_prompt = """
     You are an academic assistant.
 
-    You have four tools:
+    You have the following tools:
 
     1. extract_assignments:
     - Use this FIRST to retrieve assignments and deadlines.
@@ -182,13 +112,31 @@ system_prompt = """
     - follows up extract_weekly_deadlines.
     - sends an email to the recipient of the upcoming deadlines.
 
-    Workflow:
+    5. study_plan
+    - takes in a topic as an input.
+    - returns a breakdown of sections or subtopics of that topic that can be each completed in a day.
+
+
+    Things you can do: 
+    1) In order to map all deadlines and due dates for a semester in the user's calendar:
     Step 1: Call extract_assignments.
     Step 2: Parse JSON results.
     Step 3: For each assignment with a valid due_date, call create_calendar_event.
-    Step 4: Extract upcoming deadlines for the next 7 days by using extract_weekly_deadlines.
-    Step 5: Use send_weekly_calendar_bulletin to send a bulletin email of upcoming deadlines to the recipient.
-    Step 6: Summarize what was created.
+    2) Send a bulletin email reminder about upcoming deadlines
+    Step 1: Extract upcoming deadlines for the next 7 days by using extract_weekly_deadlines.
+    Step 2: Use send_weekly_calendar_bulletin to send a bulletin email of upcoming deadlines to the recipient.
+    Step 3: Summarize what was created.
+    3) Create a study plan for a user
+    Step 1: Use the study plan tool to get a breakdown of a topic into subtopics that can each be studies in a day
+    Step 2: Assign dates to each sub topic.
+    Step 3 : Map these dates into the following JSON format
+    [
+        {{
+            "assignment_name": "Homework 1",
+            "due_date": "2026-03-10"
+        }}
+    ]
+    Step 4: Add these dates to the google calendar along with the subtopic name as the title
 
     Do NOT hallucinate assignments.
 
@@ -196,11 +144,11 @@ system_prompt = """
 
 agent = create_agent(
     model=agent_llm,
-    tools=[extract_assignments, create_calendar_event, extract_weekly_deadlines, send_weekly_calendar_bulletin],
+    tools=[extract_assignments, create_calendar_event, extract_weekly_deadlines, send_weekly_calendar_bulletin, study_plan],
     system_prompt=system_prompt
 )
 
-print("Agent ready with 2 tools!")
+print("Agent ready with 5 tools!")
 print("="*50)
 
 
@@ -208,14 +156,35 @@ print("="*50)
 
 
 # Invoke the agent
+
+# response = agent.invoke({
+#     "messages": [
+#         {
+#             "role": "human",
+#             "content": "Extract all assignments and create calendar events for them. Then extract the upcoming deadlines for the next 7 days and send out the email"
+#         }
+#     ]
+# })
+
 response = agent.invoke({
     "messages": [
         {
             "role": "human",
-            "content": "Extract all assignments and create calendar events for them. Then extract the upcoming deadlines for the next 7 days and send out the email"
+            "content": "Create a study plan for the topic 'perceptrons' and add the dates to my calendar. I would like to start studying on June 1st, 2026"
         }
     ]
 })
+
+# response = agent.invoke({
+#     "messages": [
+#         {
+#             "role": "human",
+#             "content": "Extract all the deadlines in the next month and send me a bulletin to my email"
+#         }
+#     ]
+# })
+
+
 
 result = response["messages"][-1].content
 print(result)
