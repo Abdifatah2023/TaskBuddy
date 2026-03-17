@@ -1,6 +1,7 @@
 import io
 import os
 import json
+from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 from pypdf import PdfReader
@@ -17,11 +18,15 @@ from langchain.agents import create_agent
 
 from Google_calendar import GoogleCalendarTool
 from google_drive import get_drive_service, list_folder_files, download_file_content, FOLDER_ID
+from email_alerts import authenticate, get_weekly_events, format_event, gmail_send_message
 
 
 # Load environment
 load_dotenv()
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+
+def format_docs(docs):
+    return "\n\n".join(doc.page_content for doc in docs)
 
 
 # Shared utilities used inside tools
@@ -53,8 +58,31 @@ template = """You are an academic assistant.
 
 prompt = ChatPromptTemplate.from_template(template)
 
-def format_docs(docs):
-    return "\n\n".join(doc.page_content for doc in docs)
+vectorstore = None
+rag_chain = None
+added_events: list[dict] = []  # tracks events added to calendar this session
+
+
+def build_rag_chain(text: str):
+    global vectorstore, rag_chain
+    chunks = text_splitter.split_text(text)
+    if not chunks:
+        return
+    vectorstore = Chroma.from_texts(
+        texts=chunks,
+        embedding=embeddings,
+        collection_name="academic_docs",
+    )
+    rag_chain = (
+        {
+            "context": vectorstore.as_retriever(search_kwargs={"k": 5}) | format_docs,
+            "question": RunnablePassthrough(),
+        }
+        | prompt
+        | ChatGoogleGenerativeAI(model="gemini-2.0-flash")
+        | StrOutputParser()
+    )
+
 
 
 # ── Tools ──────────────────────────────────────────────────────────────────────
@@ -98,22 +126,7 @@ def extract_assignments_from_file(file_id: str, file_name: str) -> str:
     if not full_text.strip():
         return f'[]  # No extractable text found in {file_name}'
 
-    chunks = text_splitter.split_text(full_text)
-    vectorstore = Chroma.from_texts(
-        texts=chunks,
-        embedding=embeddings,
-        collection_name=f"syllabus_{file_id[:8]}",
-    )
-
-    rag_chain = (
-        {
-            "context": vectorstore.as_retriever(search_kwargs={"k": 5}) | format_docs,
-            "question": RunnablePassthrough(),
-        }
-        | prompt
-        | ChatGoogleGenerativeAI(model="gemini-2.0-flash")
-        | StrOutputParser()
-    )
+    build_rag_chain(full_text)
 
     return rag_chain.invoke(
         f"Extract all assignments, projects, and exams with their due dates from: {file_name}"
@@ -127,14 +140,62 @@ def create_calendar_event(title: str, due_date: str) -> str:
     The event should start and end on the due date.
     Only call this when due_date is NOT null.
     """
-    return GoogleCalendarTool(title=title, start_time=due_date, end_time=due_date)
+    print("Running create_calendar_event")
+    result = GoogleCalendarTool(title=title, start_time=due_date, end_time=due_date)
+    if result.startswith("Event created successfully"):
+        added_events.append({"title": title, "due_date": due_date})
+    return result
 
+@tool
+def extract_weekly_deadlines(_: str = "") -> str:
+    """
+    Return deadlines added to the calendar this session that fall within the next 7 days.
+    """
+    print("Running extract_weekly_deadlines...")
+    today = datetime.now(timezone.utc).date()
+    cutoff = today + timedelta(days=7)
+    upcoming = []
+    for event in added_events:
+        try:
+            event_date = datetime.fromisoformat(event["due_date"]).date()
+        except ValueError:
+            event_date = datetime.strptime(event["due_date"], "%Y-%m-%d").date()
+        if today <= event_date <= cutoff:
+            upcoming.append(event)
+    if not upcoming:
+        return "No deadlines added this session fall within the next 7 days."
+    return json.dumps(upcoming)
+
+
+@tool
+def send_weekly_calendar_bulletin(_: str = "send") -> str:
+    """
+    Build and send a weekly bulletin from Google Calendar events using email_alerts.py.
+    """
+    try:
+        print("Running send_weekly_calendar_bulletin...")
+        creds = authenticate()
+        if not creds:
+            return "Failed: could not authenticate."
+
+        events = get_weekly_events(creds)
+        if events is None:
+            return "Failed: could not fetch calendar events."
+
+        email_body = format_event(events)
+        result = gmail_send_message(creds, email_body)
+
+        if result is None:
+            return "Failed: Gmail send returned no result."
+        return "Success: weekly bulletin email sent."
+    except Exception as e:
+        return f"Failed with error: {str(e)}"
 
 # ── Agent Setup ────────────────────────────────────────────────────────────────
 
 agent_llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
 
-system_prompt = """
+agent_prompt = """
     You are an academic assistant that processes syllabus files from Google Drive.
 
     You have three tools:
@@ -151,20 +212,31 @@ system_prompt = """
        - Call this for each assignment that has a valid (non-null) due_date.
        - Pass the assignment name as title and the due_date.
 
+    4. extract_weekly_deadlines:
+       - Returns only the deadlines added to the calendar this session that fall within the next 7 days.
+
+    5. send_weekly_calendar_bulletin
+       - follows up extract_weekly_deadlines.
+       - sends an email to the recipient of the upcoming deadlines.
+
     Workflow:
     Step 1: Call list_drive_syllabi to get all files.
     Step 2: For each file, call extract_assignments_from_file individually.
     Step 3: Parse the JSON results from each file.
     Step 4: For each assignment with a valid due_date, call create_calendar_event.
-    Step 5: Summarize all assignments added to the calendar.
+    Step 5: Extract upcoming deadlines for the next 7 days by using extract_weekly_deadlines.
+    Step 6: Use send_weekly_calendar_bulletin to send a bulletin email of upcoming deadlines to the recipient.
+    Step 7: Summarize the tasks completed (a list of tasks added to the calendar and a confirmation of email sent.)
 
     Do NOT hallucinate assignments or due dates.
     """
 
 agent = create_agent(
     model=agent_llm,
-    tools=[list_drive_syllabi, extract_assignments_from_file, create_calendar_event],
-    system_prompt=system_prompt,
+    tools=[list_drive_syllabi, extract_assignments_from_file,
+            create_calendar_event, extract_weekly_deadlines, 
+            send_weekly_calendar_bulletin],
+    system_prompt=agent_prompt,
 )
 
 print("Agent ready with 3 tools!")
@@ -175,7 +247,11 @@ response = agent.invoke({
     "messages": [
         {
             "role": "human",
-            "content": "Scan all syllabus files in the Drive folder, extract every assignment and deadline, and add them to my Google Calendar.",
+            "content": '''
+                Scan all syllabus files in the Drive folder, 
+                extract every assignment and deadline, 
+                and add them to my Google Calendar.Then extract the upcoming deadlines for the next 7 days and send out the email
+                ''',
         }
     ]
 })

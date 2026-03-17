@@ -152,3 +152,4 @@ def GoogleCalendarTool(title: str, start_time: str, end_time: str = None):
         return f"Google Calendar API error: {error}"
     except Exception as e:
         return f"Unexpected error: {str(e)}"
+

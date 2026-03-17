@@ -4,4 +4,4 @@
 token.json
 Calendar_token.json
 docling_app.py
-__pycache__/
+/__pycache__
