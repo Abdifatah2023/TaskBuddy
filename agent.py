@@ -5,8 +5,9 @@ from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.tools import tool
 from langchain.agents import create_agent
-from google_calendar import GoogleCalendarTool
-from email_alerts import authenticate, get_weekly_events, format_event, gmail_send_message
+# from Google_calendar import GoogleCalendarTool
+from calendar_api import create_calendar_event
+from gmail_api import get_weekly_events, format_event, gmail_send_message
 from rag_chain import rag_chain
 
 # Load environment
@@ -25,20 +26,25 @@ def extract_assignments(query: str) -> str:
 
 # Google calendar custom tool
 @tool
-def create_calendar_event(
-    title: str,
-    due_date: str 
-) -> str:
+def create_calendar_event_tool(title: str, due_date: str) -> str:
     
     """
-    Create a Google Calendar event for an assignment. 
-    The event should start and end on the due date.
+    Create a Google Calendar event for an assignment/task/event. 
+    the event should start and end on the due date.
+
+    Input parameters: 
+    - For the due_date, the following format is acceptable
+        YYYY-MM-DD
+        YYYY-MM-DD HH:MM:SS
+        ISO formats like YYYY-MM-DDTHH:MM:SS
+    - The title is a string
     """
 
-    GoogleCalendarTool(
+    create_calendar_event(
         title=title, 
         start_time=due_date, 
         end_time=due_date
+        # Add description and location if you want
     )
     return f"Event created for {title} on {due_date}"
     
@@ -58,21 +64,21 @@ def send_weekly_calendar_bulletin(_: str = "send") -> str:
     """
     try:
         print("Running send_weekly_calendar_bulletin...")
-        creds = authenticate()
-        if not creds:
-            return "Failed: could not authenticate."
 
-        events = get_weekly_events(creds)
+        events = get_weekly_events()
+
         if events is None:
             return "Failed: could not fetch calendar events."
 
         email_body = format_event(events)
-        result = gmail_send_message(creds, email_body)
+        result = gmail_send_message(email_body)
 
         if result is None:
             return "Failed: Gmail send returned no result."
+        
         print("Success: weekly bulletin email sent.")
         return "Success: weekly bulletin email sent."
+    
     except Exception as e:
         return f"Failed with error: {str(e)}"
 
@@ -144,7 +150,7 @@ system_prompt = """
 
 agent = create_agent(
     model=agent_llm,
-    tools=[extract_assignments, create_calendar_event, extract_weekly_deadlines, send_weekly_calendar_bulletin, study_plan],
+    tools=[extract_assignments, create_calendar_event_tool, extract_weekly_deadlines, send_weekly_calendar_bulletin, study_plan],
     system_prompt=system_prompt
 )
 
@@ -166,23 +172,23 @@ print("="*50)
 #     ]
 # })
 
-response = agent.invoke({
-    "messages": [
-        {
-            "role": "human",
-            "content": "Create a study plan for the topic 'perceptrons' and add the dates to my calendar. I would like to start studying on June 1st, 2026"
-        }
-    ]
-})
-
 # response = agent.invoke({
 #     "messages": [
 #         {
 #             "role": "human",
-#             "content": "Extract all the deadlines in the next month and send me a bulletin to my email"
+#             "content": "Create a study plan for learning how to create a custom tool in LangChain. Then add the dates to my calendar. I would like to start studying on June 1st, 2026"
 #         }
 #     ]
 # })
+
+response = agent.invoke({
+    "messages": [
+        {
+            "role": "human",
+            "content": "Extract all the deadlines in the next week and send me a bulletin to my email. Today is March 21st, 2026"
+        }
+    ]
+})
 
 
 

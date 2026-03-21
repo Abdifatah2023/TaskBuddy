@@ -2,22 +2,19 @@ from datetime import datetime, time, timedelta
 import zoneinfo
 import os.path
 
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from google_auth import get_calendar_service
 
-# Scope allows creating + modifying events
-SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
+
+
 
 TIMEZONE = "America/Chicago"
 tz = zoneinfo.ZoneInfo(TIMEZONE)
 
 
-# ----------------------------
-# Helper: Parse Date / DateTime
-# ----------------------------
+
+
+# Helper function : Parse Date / DateTime
 def parse_datetime(dt_string: str, default_hour=9):
     """
     Accepts:
@@ -42,9 +39,7 @@ def parse_datetime(dt_string: str, default_hour=9):
     return dt
 
 
-# ----------------------------
-# Helper: Check if event exists
-# ----------------------------
+# Helper function : checks if event exists
 def event_exists(service, title, start_iso, end_iso):
     events_result = service.events().list(
         calendarId="primary",
@@ -63,35 +58,10 @@ def event_exists(service, title, start_iso, end_iso):
     return False
 
 
-# ----------------------------
-# Main Tool Function
-# ----------------------------
-def GoogleCalendarTool(title: str, start_time: str, end_time: str = None):
-    creds = None
+def create_calendar_event(title: str, start_time: str, end_time: str = None,  description : str = "", location : str = "N/A"):
+    try :   
+        service = get_calendar_service()
 
-    # Load token if exists
-    if os.path.exists("calendar_token.json"):
-        creds = Credentials.from_authorized_user_file("calendar_token.json", SCOPES)
-
-    # Refresh or authenticate if needed
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                "credentials.json", SCOPES
-            )
-            creds = flow.run_local_server(port=0)
-
-        with open("calendar_token.json", "w") as token:
-            token.write(creds.to_json())
-
-    try:
-        service = build("calendar", "v3", credentials=creds)
-
-        # ----------------------------
-        # Parse Start / End Times
-        # ----------------------------
         start_dt = parse_datetime(start_time, default_hour=9)
 
         if end_time:
@@ -101,22 +71,18 @@ def GoogleCalendarTool(title: str, start_time: str, end_time: str = None):
             end_dt = start_dt + timedelta(hours=1)
 
         # Ensure end is after start
-        if end_dt <= start_dt:
-            end_dt = start_dt + timedelta(hours=1)
+            if end_dt <= start_dt:
+                end_dt = start_dt + timedelta(hours=1)
 
+        # Convert dates to iso format
         start_iso = start_dt.isoformat()
         end_iso = end_dt.isoformat()
 
-        # ----------------------------
-        # Duplicate Check
-        # ----------------------------
+        # Check for duplicate events
         if event_exists(service, title, start_iso, end_iso):
-            return f"Event '{title}' already exists during that time."
+                return f"Event '{title}' already exists during that time."
 
-        # ----------------------------
-        # Event Payload
-        # ----------------------------
-        event_body = {
+        event = {
             "summary": title,
             "location": "Not specified",
             "description": "Created via TaskBuddy AI assistant",
@@ -137,13 +103,13 @@ def GoogleCalendarTool(title: str, start_time: str, end_time: str = None):
             },
         }
 
-        created_event = service.events().insert(
+        result = service.events().insert(
             calendarId="primary",
-            body=event_body
+            body=event
         ).execute()
 
-        return f"Event created successfully: {created_event.get('htmlLink')}"
-
+        return f"Event created: {result['htmlLink']}"
+    
     except HttpError as error:
         return f"Google Calendar API error: {error}"
     except Exception as e:

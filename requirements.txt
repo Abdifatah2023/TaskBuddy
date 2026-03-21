@@ -9,7 +9,11 @@ datetime
 google-auth 
 google-auth-oauthlib 
 google-api-python-client
-pypdf
 chromadb
 langchain-chroma
 tzdata
+requests
+python-dotenv
+beautifulsoup4
+TextLoader
+unstructured

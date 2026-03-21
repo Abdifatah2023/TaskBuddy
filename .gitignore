@@ -3,3 +3,4 @@ credentials.json
 __pycache__
 *.pyc
 *token.json
+canvas_course_content

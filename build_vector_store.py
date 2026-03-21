@@ -3,30 +3,93 @@ import os
 from dotenv import load_dotenv
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import DirectoryLoader
-from langchain_community.document_loaders import PyPDFLoader
+# from langchain_community.document_loaders import DirectoryLoader, UnstructuredFileLoader
 from langchain_community.vectorstores import Chroma
 # from langchain_chroma import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_core.documents import Document
 
 # Load environment
 load_dotenv()
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 
-# Mock Data path
-mock_data_path = r"V:\OneDrive\Shreena Documents\GitHub\TaskBuddy\Syllabi"
-
 # Initialize the loader with the path to the directory which contains the pdfs
-loader = DirectoryLoader(
-    mock_data_path,
-    glob="*.pdf",
-    loader_cls=PyPDFLoader
-)
+# loader = DirectoryLoader(
+#     "canvas_course_content", # Folder where the course content was uploaded by the canvas_api.py script
+#     glob="**/*.txt",         # Get txt files from all folders
+#     loader_cls=TextLoader,
+# )
 
-docs = loader.load()
+
+documents = []
+
+base_dir = "canvas_course_content"
+
+for root, _, files in os.walk(base_dir):
+    for file in files:
+        if not file.endswith(".txt"):
+            continue
+
+        path = os.path.join(root, file)
+
+        try:
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                text = f.read()
+
+            if len(text.strip()) < 50:
+                continue  # skip empty/useless files
+
+            documents.append(
+                Document(
+                    page_content=text,
+                    metadata={"source": path}
+                )
+            )
+
+        except Exception as e:
+            print(f"❌ Skipping {path}: {e}")
+
+print(f"Loaded {len(documents)} documents")
+
+
+
+# Format of each document
+# Document(page_content="...", metadata={"source": "Module 1/Intro.txt"})
+# docs = loader.load()
+
+# Handling files that may be almost empty
+# docs = [doc for doc in docs if len(doc.page_content.strip()) > 50]
 
 # Join all the content of all the pages
 # full_text = "\n\n".join([doc.page_content for doc in docs])
+
+# Add metadata (useful for filtering and citations)
+# for doc in docs:
+#     path = doc.metadata["source"]
+    
+#     parts = path.split("/")
+#     if len(parts) > 1:
+#         doc.metadata["module"] = parts[-2]
+    
+#     doc.metadata["type"] = "canvas_page"
+
+parts = path.split(os.sep)
+
+if len(parts) > 1:
+    module_name = parts[-2]
+else:
+    module_name = "unknown"
+
+documents.append(
+    Document(
+        page_content=text,
+        metadata={
+            "source": path,
+            "module": module_name,
+            "type": "canvas_page"
+        }
+    )
+)
 
 # create chunks
 text_splitter = RecursiveCharacterTextSplitter(
@@ -36,7 +99,7 @@ text_splitter = RecursiveCharacterTextSplitter(
     # chunk_overlap = 150,
 )
 # chunks = text_splitter.split_text(full_text)
-chunks = text_splitter.split_documents(docs)
+chunks = text_splitter.split_documents(documents)
 
 # embedding
 embeddings = GoogleGenerativeAIEmbeddings(

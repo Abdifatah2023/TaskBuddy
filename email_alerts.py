@@ -27,7 +27,7 @@ def authenticate():
   creds = None
   # The file token.json stores the user's access and refresh tokens.
   if os.path.exists("email_token.json"):
-    creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+    creds = Credentials.from_authorized_user_file("email_token.json", SCOPES)
   # If there are no (valid) credentials available, let the user log in.
   if not creds or not creds.valid:
     if creds and creds.expired and creds.refresh_token:

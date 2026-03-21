@@ -35,30 +35,39 @@ retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
 #     print(d.page_content[:200])
 
 # prompt template
-template = """You are a helpful academic assistant. You can do two main things: 
-            1) You can use the syllabus document to extract every assignment, project, or exam mentioned and then 
-                give the due dates for each. Use the given context to find these.  
-                Return output STRICTLY in JSON format like this:
-                [
-                {{
-                    "assignment_name": "Homework 1",
-                    "due_date": "2026-03-10"
-                }}
-                ]
-                If a due date is missing, set "due_date" to null
-            2) You can use notes, syllabus and all other documents to give an answer to the question or a summary (if asked for)
-                which would be grounded in the context given below. 
-                The information isn't provided in the context, say 
-                "I don't  have enough information to answer the question."
+# template = """You are a helpful academic assistant. You can do two main things: 
+#             1) You can use the syllabus document to extract every assignment, project, or exam mentioned and then 
+#                 give the due dates for each. Use the given context to find these.  
+#                 Return output STRICTLY in JSON format like this:
+#                 [
+#                 {{
+#                     "assignment_name": "Homework 1",
+#                     "due_date": "2026-03-10"
+#                 }}
+#                 ]
+#                 If a due date is missing, set "due_date" to null
+#             2) You can use notes, syllabus and all other documents to give an answer to the question or a summary (if asked for)
+#                 which would be grounded in the context given below. 
+#                 The information isn't provided in the context, say 
+#                 "I don't  have enough information to answer the question."
 
-            Context: 
-            {context}
+#             Context: 
+#             {context}
 
-            Question: 
-            {question}
+#             Question: 
+#             {question}
 
-            """
+#             """
 
+template = """
+You are a helpful academic assistant. You can use the notes, syllabus and all other documents 
+to give a response to the user's query grounded in the context given below. 
+If the information isn't provided in the context, say "I don't  have enough information to answer the question".
+
+Context: {context}
+
+Question: {question}
+"""
 
 prompt = ChatPromptTemplate.from_template(template)
 
@@ -75,13 +84,16 @@ rag_chain = (
     | ChatGoogleGenerativeAI(model="gemini-flash-latest")
     | StrOutputParser()
 )
-# query = "Could give me a table of all the assignment and events along with their deadlines from the Web Technologies class syllabus files?"
-# print(rag_chain.invoke(query))
+query = "Could give me a table of all the assignment and events along with their deadlines from the Syllabus? For the events with no dates or deadlines return null"
+print(rag_chain.invoke(query))
 
 # query = "Can you explain what the average perceptron and voted perceptron are and how they differ?"
 # print(rag_chain.invoke(query))
 
 # query = "I need to study for a perceptron exam. Can you break it apart into topics"
+# print(rag_chain.invoke(query))
+
+# query = "I need to study for a exam on integrating tools to my AI agent. Can you split the topic into subtopics for me?"
 # print(rag_chain.invoke(query))
 
 # Check retrieved chunks
