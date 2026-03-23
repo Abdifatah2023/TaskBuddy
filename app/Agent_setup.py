@@ -1,11 +1,8 @@
-import io
-import os
 import json
 from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
-from pypdf import PdfReader
-from docx import Document
+
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.tools import tool
@@ -13,7 +10,6 @@ from langgraph.prebuilt import create_react_agent
 
 import RagPipeline as rp
 from Google_calendar import GoogleCalendarTool
-from google_drive import get_drive_service, list_folder_files, download_file_content, FOLDER_ID
 from email_alerts import authenticate, get_weekly_events, format_event, gmail_send_message
 from canvas import list_canvas_courses, save_canvas_course_to_drive, extract_assignments_from_canvas
 
@@ -21,60 +17,6 @@ load_dotenv()
 
 # Events added to the calendar this session (for the weekly digest)
 added_events: list[dict] = []
-
-
-# # ── Tools: Google Drive syllabus fallback ─────────────────────────────────────
-
-@tool
-# def list_drive_syllabi(_: str = "") -> str:
-#     """
-#     List all syllabus files already stored in the configured Google Drive folder.
-#     Returns a JSON list of {file_id, file_name}.
-#     Use this to discover any Drive files that were not sourced from Canvas.
-#     """
-#     service = get_drive_service()
-#     files = list_folder_files(service, FOLDER_ID)
-#     result = [{"file_id": fid, "file_name": f["name"]} for fid, f in files.items()]
-#     return json.dumps(result)
-
-
-# @tool
-# def extract_assignments_from_file(file_id: str, file_name: str) -> str:
-#     """
-#     Download a syllabus file from Google Drive by its file_id and extract all
-#     assignments and deadlines from it using the RAG pipeline.
-#     Returns a JSON list of {assignment_name, due_date} objects.
-#     Only call this for Drive files that are NOT already processed via Canvas.
-#     """
-#     service = get_drive_service()
-#     meta = service.files().get(fileId=file_id, fields="mimeType").execute()
-#     mime_type = meta["mimeType"]
-
-#     try:
-#         file_bytes = download_file_content(service, file_id, mime_type)
-#     except Exception as e:
-#         return f"[]  # Error downloading file: {e}"
-
-#     DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-#     DOC  = "application/msword"
-
-#     if mime_type in (DOCX, DOC):
-#         doc = Document(io.BytesIO(file_bytes))
-#         full_text = "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
-#     else:
-#         reader = PdfReader(io.BytesIO(file_bytes))
-#         full_text = "\n\n".join(page.extract_text() or "" for page in reader.pages)
-
-#     if not full_text.strip():
-#         return f"[]  # No extractable text found in {file_name}"
-
-#     rp.build_rag_chain(full_text)
-#     if rp.rag_chain is None:
-#         return f"[]  # RAG chain could not be built for {file_name}"
-
-#     return rp.rag_chain.invoke(
-#         f"Extract all assignments, projects, and exams with their due dates from: {file_name}"
-#     )
 
 
 # ── Tools: Calendar ───────────────────────────────────────────────────────────
@@ -252,29 +194,29 @@ agent = create_react_agent(
 )
 
 
-def run_agent() -> str:
-    """Run the full TaskBuddy workflow and return the final summary."""
-    global added_events
-    added_events = []  # reset for each run
+# def run_agent() -> str:
+#     """Run the full TaskBuddy workflow and return the final summary."""
+#     global added_events
+#     added_events = []  # reset for each run
 
-    response = agent.invoke({
-        "messages": [
-            {
-                "role": "human",
-                "content": (
-                    "Run the full workflow: "
-                    "scan available Canvas courses, save their syllabi and content to Google Drive, "
-                    "extract every assignment and deadline and add them to Google Calendar, "
-                    "generate the upcoming 7-day deadline list, send the weekly bulletin email, "
-                    "and produce a summary and study plan for each course available."
-                ),
-            }
-        ]
-    })
-    return response["messages"][-1].content
+#     response = agent.invoke({
+#         "messages": [
+#             {
+#                 "role": "human",
+#                 "content": (
+#                     "Run the full workflow: "
+#                     "scan available Canvas courses, save their syllabi and content to Google Drive, "
+#                     "extract every assignment and deadline and add them to Google Calendar, "
+#                     "generate the upcoming 7-day deadline list, send the weekly bulletin email, "
+#                     "and produce a summary and study plan for each course available."
+#                 ),
+#             }
+#         ]
+#     })
+#     return response["messages"][-1].content
 
 
-if __name__ == "__main__":
-    print("TaskBuddy agent starting...")
-    print("=" * 60)
-    print(run_agent())
+# if __name__ == "__main__":
+#     print("TaskBuddy agent starting...")
+#     print("=" * 60)
+#     print(run_agent())
