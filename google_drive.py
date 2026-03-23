@@ -10,12 +10,13 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 
 # If modifying these scopes, delete the file token.json.
-SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+SCOPES = ["https://www.googleapis.com/auth/drive"]  # full Drive access needed to create subfolders in any parent
+
 
 # Set the shared folder ID to monitor.
 # You can find the folder ID in the folder's URL:
 # https://drive.google.com/drive/folders/<FOLDER_ID>
-FOLDER_ID = "1ujBDlxP-BnJTajOuSEeOWeWirrawjXGT"
+FOLDER_ID = "13WX9umc50PfmhSbTDmD5hMRvv2ZyQ2W3"
 
 # How often to check for changes (in seconds)
 POLL_INTERVAL = 30
@@ -25,6 +26,9 @@ def get_credentials():
     creds = None
     if os.path.exists("drive_token.json"):
         creds = Credentials.from_authorized_user_file("drive_token.json", SCOPES)
+        # If the saved token was issued with a narrower scope, force re-auth
+        if not creds.has_scopes(SCOPES):
+            creds = None
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
@@ -49,19 +53,31 @@ def download_file_content(service, file_id: str, mime_type: str) -> bytes:
     - Google Workspace files (Docs, Sheets, etc.) are exported as PDF.
     - All other files (PDF, DOCX, DOC) are downloaded as-is.
     """
-    if mime_type.startswith("application/vnd.google-apps."):
-        request = service.files().export_media(
-            fileId=file_id, mimeType="application/pdf"
-        )
-    else:
-        request = service.files().get_media(fileId=file_id)
+    # List of Google Docs Editors mime types that support export
+    EXPORTABLE_TYPES = {
+        "application/vnd.google-apps.document",
+        "application/vnd.google-apps.spreadsheet",
+        "application/vnd.google-apps.presentation",
+        "application/vnd.google-apps.drawing",
+    }
+    try:
+        if mime_type in EXPORTABLE_TYPES:
+            request = service.files().export_media(
+                fileId=file_id, mimeType="application/pdf"
+            )
+        elif mime_type.startswith("application/vnd.google-apps."):
+            raise ValueError(f"File type {mime_type} is not exportable via API.")
+        else:
+            request = service.files().get_media(fileId=file_id)
 
-    buffer = io.BytesIO()
-    downloader = MediaIoBaseDownload(buffer, request)
-    done = False
-    while not done:
-        _, done = downloader.next_chunk()
-    return buffer.getvalue()
+        buffer = io.BytesIO()
+        downloader = MediaIoBaseDownload(buffer, request)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+        return buffer.getvalue()
+    except Exception as e:
+        raise RuntimeError(f"Failed to download file {file_id}: {e}")
 
 
 def list_folder_files(service, folder_id):
