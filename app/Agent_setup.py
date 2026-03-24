@@ -8,10 +8,10 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 
-import RagPipeline as rp
-from Google_calendar import GoogleCalendarTool
-from email_alerts import authenticate, get_weekly_events, format_event, gmail_send_message
-from canvas import list_canvas_courses, save_canvas_course_to_drive, extract_assignments_from_canvas
+import app.RagPipeline as rp
+from app.Google_calendar import GoogleCalendarTool
+from app.email_alerts import authenticate, gmail_send_message
+from app.canvas import list_canvas_courses, save_canvas_course_to_drive, extract_assignments_from_canvas, _get_course_text
 
 load_dotenv()
 
@@ -62,18 +62,38 @@ def extract_weekly_deadlines(_: str = "") -> str:
 @tool
 def send_weekly_calendar_bulletin(_: str = "") -> str:
     """
-    Fetch all Google Calendar events for the next 7 days and send a weekly
-    bulletin email summarising the upcoming deadlines.
+    Send a weekly bulletin email listing only the assignments added to Google
+    Calendar by TaskBuddy this session that are due within the next 7 days.
+    If none are due in that window, the email says so explicitly.
     Call this after extract_weekly_deadlines.
     """
     try:
         creds = authenticate()
         if not creds:
-            return "Failed: could not authenticate Gmail/Calendar."
-        events = get_weekly_events(creds)
-        if events is None:
-            return "Failed: could not fetch calendar events."
-        email_body = format_event(events)
+            return "Failed: could not authenticate Gmail."
+
+        today = datetime.now(timezone.utc).date()
+        cutoff = today + timedelta(days=7)
+        upcoming = []
+        for event in added_events:
+            try:
+                event_date = datetime.fromisoformat(event["due_date"]).date()
+            except ValueError:
+                event_date = datetime.strptime(event["due_date"], "%Y-%m-%d").date()
+            if today <= event_date <= cutoff:
+                upcoming.append(event)
+
+        if upcoming:
+            lines = ["TaskBuddy — Upcoming Deadlines (Next 7 Days)\n"]
+            for ev in sorted(upcoming, key=lambda e: e["due_date"]):
+                lines.append(f"- {ev['title']}  (Due: {ev['due_date']})")
+            email_body = "\n".join(lines)
+        else:
+            email_body = (
+                "TaskBuddy — Weekly Deadlines Bulletin\n\n"
+                "You have no assignments due in the next 7 days. Great work staying on top of things!"
+            )
+
         result = gmail_send_message(creds, email_body)
         if result is None:
             return "Failed: Gmail send returned no result."
@@ -94,8 +114,6 @@ def generate_study_plan(course_id: str, course_name: str) -> str:
     Returns the generated summary and study plan as formatted text.
     Call this for EACH course after all calendar events have been created.
     """
-    from canvas import _get_course_text
-
     full_text = _get_course_text(course_id)
     if not full_text.strip():
         return f"No content found for course '{course_name}' ({course_id})."
@@ -146,8 +164,8 @@ management end-to-end. Follow the steps below IN ORDER and DO NOT skip any step.
    - Returns JSON list or a "no upcoming deadlines" message.
 
 6. send_weekly_calendar_bulletin
-   - Reads Google Calendar for the next 7 days and sends a bulletin email
-     listing every upcoming deadline.
+   - Sends a bulletin email listing only the deadlines added this session
+     that fall within the next 7 days. Addresses the user if none exist.
 
 [Study Plans]
 7. generate_study_plan  (call for EACH course)
@@ -193,30 +211,3 @@ agent = create_react_agent(
     prompt=_agent_prompt,
 )
 
-
-# def run_agent() -> str:
-#     """Run the full TaskBuddy workflow and return the final summary."""
-#     global added_events
-#     added_events = []  # reset for each run
-
-#     response = agent.invoke({
-#         "messages": [
-#             {
-#                 "role": "human",
-#                 "content": (
-#                     "Run the full workflow: "
-#                     "scan available Canvas courses, save their syllabi and content to Google Drive, "
-#                     "extract every assignment and deadline and add them to Google Calendar, "
-#                     "generate the upcoming 7-day deadline list, send the weekly bulletin email, "
-#                     "and produce a summary and study plan for each course available."
-#                 ),
-#             }
-#         ]
-#     })
-#     return response["messages"][-1].content
-
-
-# if __name__ == "__main__":
-#     print("TaskBuddy agent starting...")
-#     print("=" * 60)
-#     print(run_agent())

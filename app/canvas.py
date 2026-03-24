@@ -127,27 +127,18 @@ def _get_syllabus_text(course_id: str) -> str:
         return f"[Syllabus fetch failed for course {course_id}: {e}]"
 
 
-def _get_course_text(course_id: str) -> str:
+def _get_modules_text(course_id: str) -> str:
     """
-    Pull all readable text from a single Canvas course:
-    syllabus + all module items (pages, assignments, quizzes, text files).
-    Returns one concatenated string ready for the RAG pipeline.
+    Pull only module content (pages, assignments, quizzes, files) from a Canvas
+    course — excludes the syllabus. Used for course_content.txt in Drive.
     """
     sections: list[str] = []
-
-    # Syllabus
-    syllabus_text = _get_syllabus_text(course_id)
-    if syllabus_text.strip():
-        sections.append(f"=== SYLLABUS (course {course_id}) ===\n{syllabus_text}")
-
-    # Modules → Items
     try:
         modules = _get_paginated(
             f"{CANVAS_BASE}/api/v1/courses/{course_id}/modules?per_page=100"
         )
     except requests.exceptions.RequestException as e:
-        sections.append(f"[Module fetch failed for course {course_id}: {e}]")
-        modules = []
+        return f"[Module fetch failed for course {course_id}: {e}]"
 
     for module in modules:
         if not isinstance(module, dict) or "id" not in module:
@@ -185,6 +176,22 @@ def _get_course_text(course_id: str) -> str:
                     f"--- [{module_name}] {item_type}: {item_title} ---\n{text}"
                 )
 
+    return "\n\n".join(sections)
+
+
+def _get_course_text(course_id: str) -> str:
+    """
+    Pull all readable text from a single Canvas course:
+    syllabus + all module items (pages, assignments, quizzes, text files).
+    Returns one concatenated string ready for the RAG pipeline.
+    """
+    sections: list[str] = []
+    syllabus_text = _get_syllabus_text(course_id)
+    if syllabus_text.strip():
+        sections.append(f"=== SYLLABUS (course {course_id}) ===\n{syllabus_text}")
+    modules_text = _get_modules_text(course_id)
+    if modules_text.strip():
+        sections.append(modules_text)
     return "\n\n".join(sections)
 
 
@@ -230,8 +237,8 @@ def save_canvas_course_to_drive(course_id: str, course_name: str) -> str:
     Returns a JSON summary with the Drive folder ID and the IDs of saved files.
     Call this for EACH course returned by list_canvas_courses.
     """
-    from google_drive import get_drive_service, FOLDER_ID
-    from drive_upload_utils import get_or_create_folder, upload_text_file
+    from app.google_drive import get_drive_service, FOLDER_ID
+    from app.drive_upload_utils import get_or_create_folder, upload_text_file
 
     service = get_drive_service()
 
@@ -254,9 +261,9 @@ def save_canvas_course_to_drive(course_id: str, course_name: str) -> str:
     except Exception as e:
         saved.append({"file": "syllabus.txt", "error": str(e)})
 
-    # Save full course content
+    # Save full course content (modules only — syllabus is saved separately above)
     try:
-        content = _get_course_text(course_id)
+        content = _get_modules_text(course_id)
         if content.strip():
             fid = upload_text_file(service, course_folder_id, "course_content.txt", content)
             saved.append({"file": "course_content.txt", "file_id": fid})
@@ -284,7 +291,7 @@ def extract_assignments_from_canvas(course_id: str) -> str:
     Call this for EACH course returned by list_canvas_courses.
     Pass one course_id at a time.
     """
-    import RagPipeline as rp
+    import app.RagPipeline as rp
 
     full_text = _get_course_text(course_id)
     if not full_text.strip():

@@ -19,6 +19,16 @@ def get_or_create_folder(service, folder_name, parent_id):
 
 def upload_text_file(service, folder_id, file_name, text):
     media = MediaInMemoryUpload(text.encode("utf-8"), mimetype="text/plain")
-    file_metadata = {"name": file_name, "parents": [folder_id]}
-    file = service.files().create(body=file_metadata, media_body=media, fields="id").execute()
+    existing = service.files().list(
+        q=f"name='{file_name}' and '{folder_id}' in parents and trashed=false",
+        fields="files(id)",
+        pageSize=1,
+    ).execute().get("files", [])
+    if existing:
+        file = service.files().update(
+            fileId=existing[0]["id"], media_body=media, fields="id"
+        ).execute()
+    else:
+        file_metadata = {"name": file_name, "parents": [folder_id]}
+        file = service.files().create(body=file_metadata, media_body=media, fields="id").execute()
     return file.get("id")

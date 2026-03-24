@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TaskBuddy</title>
+  <link rel="icon" type="image/png" href="/ui/favicon.png" />
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --navy:       #060d1f;
+      --navy-mid:   #0d1b35;
+      --navy-light: #132240;
+      --navy-card:  #0f1e3a;
+      --lime:       #b6f000;
+      --lime-dim:   #8ab800;
+      --lime-glow:  rgba(182, 240, 0, 0.18);
+      --text:       #d4e8ff;
+      --text-dim:   #6b88b0;
+      --border:     rgba(182, 240, 0, 0.15);
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--navy);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      overflow-y: auto;
+    }
+
+    .app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 20px;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 22px 0 18px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .logo {
+      flex-shrink: 0;
+      width: 54px;
+      height: 54px;
+    }
+
+    .header-text h1 {
+      font-size: 2rem;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      color: var(--lime);
+      line-height: 1;
+      text-shadow: 0 0 28px var(--lime-glow);
+    }
+
+    .header-text p {
+      margin-top: 4px;
+      font-size: 0.9rem;
+      color: var(--text-dim);
+      letter-spacing: 0.4px;
+    }
+
+    .header-right {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--navy-card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 5px 12px;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+    }
+    .status-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--text-dim);
+      transition: background 0.3s;
+    }
+    .status-dot.online { background: var(--lime); box-shadow: 0 0 5px var(--lime); }
+    .status-pill.online { color: var(--lime); border-color: rgba(182,240,0,0.35); }
+
+    /* ── Main two-panel body ── */
+    .body {
+      flex: 1;
+      display: flex;
+      gap: 18px;
+      min-height: 0;
+      padding: 18px 0;
+    }
+
+    /* ── LEFT: Agent panel ── */
+    .agent-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      width: 300px;
+      flex-shrink: 0;
+      min-height: 0;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--navy-light) transparent;
+    }
+    .agent-panel::-webkit-scrollbar { width: 3px; }
+    .agent-panel::-webkit-scrollbar-thumb { background: var(--navy-light); border-radius: 3px; }
+
+    .panel-card {
+      background: var(--navy-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px;
+    }
+
+    .panel-card h2 {
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--lime);
+      margin-bottom: 10px;
+    }
+
+    .panel-card p {
+      font-size: 0.9rem;
+      color: var(--text-dim);
+      line-height: 1.55;
+    }
+
+    .btn-run {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      padding: 13px;
+      background: var(--lime);
+      color: var(--navy);
+      font-size: 0.9rem;
+      font-weight: 700;
+      letter-spacing: 0.4px;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.2s, box-shadow 0.2s, transform 0.1s;
+      margin-top: 14px;
+    }
+    .btn-run:hover:not(:disabled) { background: #ceff00; box-shadow: 0 0 20px var(--lime-glow); }
+    .btn-run:active:not(:disabled) { transform: scale(0.98); }
+    .btn-run:disabled { opacity: 0.55; cursor: not-allowed; }
+
+    .btn-run .run-icon { width: 16px; height: 16px; fill: var(--navy); flex-shrink: 0; }
+    .btn-run.spinning .run-icon { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* agent status */
+    .agent-status {
+      display: none;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .agent-status.visible { display: flex; }
+
+    .agent-status-label {
+      font-size: 0.75rem;
+      color: var(--lime);
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .pulse-ring {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      border: 2px solid var(--lime);
+      animation: pulseRing 1.2s ease-in-out infinite;
+    }
+    @keyframes pulseRing {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.4; transform: scale(1.4); }
+    }
+
+    .agent-output {
+      background: var(--navy-mid);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      overflow-y: auto;
+      font-size: 0.88rem;
+      color: var(--text-dim);
+      line-height: 1.55;
+      min-height: 80px;
+      max-height: 60vh;
+      scrollbar-width: thin;
+      scrollbar-color: var(--navy-light) transparent;
+    }
+    .agent-output::-webkit-scrollbar { width: 3px; }
+    .agent-output::-webkit-scrollbar-thumb { background: var(--navy-light); border-radius: 3px; }
+
+    /* markdown inside agent output */
+    .agent-output h1, .agent-output h2 { color: var(--lime); font-size: 0.88rem; margin: 10px 0 4px; }
+    .agent-output h3 { color: var(--text); font-size: 0.83rem; margin: 8px 0 3px; }
+    .agent-output ul, .agent-output ol { padding-left: 18px; margin: 4px 0; }
+    .agent-output li { margin-bottom: 2px; }
+    .agent-output strong { color: var(--text); }
+    .agent-output code { background: var(--navy-light); padding: 1px 5px; border-radius: 4px; font-size: 0.78rem; }
+    .agent-output pre { background: var(--navy-light); padding: 8px; border-radius: 6px; overflow-x: auto; margin: 6px 0; }
+    .agent-output p { margin-bottom: 5px; }
+
+    /* step list */
+    .steps {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .step {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.78rem;
+      color: var(--text-dim);
+    }
+    .step-icon {
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      background: var(--navy-light);
+      border: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      font-size: 0.6rem;
+    }
+    .step.done .step-icon { background: var(--lime); border-color: var(--lime); color: var(--navy); }
+    .step.active .step-icon { border-color: var(--lime); color: var(--lime); animation: pulseRing 1s infinite; }
+    .step.done { color: var(--text); }
+
+    /* ── RIGHT: Chat panel ── */
+    .chat-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      background: var(--navy-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+
+    .chat-header {
+      padding: 13px 18px;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--lime);
+      flex-shrink: 0;
+    }
+
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 16px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--navy-light) transparent;
+    }
+    .chat-messages::-webkit-scrollbar { width: 3px; }
+    .chat-messages::-webkit-scrollbar-thumb { background: var(--navy-light); border-radius: 3px; }
+
+    /* ── Messages ── */
+    .msg {
+      display: flex;
+      gap: 9px;
+      animation: fadeUp 0.22s ease;
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .msg.user { flex-direction: row-reverse; }
+
+    .avatar {
+      flex-shrink: 0;
+      width: 30px; height: 30px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.7rem; font-weight: 700;
+    }
+    .msg.bot  .avatar { background: var(--lime); color: var(--navy); }
+    .msg.user .avatar { background: var(--navy-light); color: var(--lime); border: 1px solid var(--border); }
+
+    .bubble {
+      max-width: 80%;
+      padding: 10px 14px;
+      border-radius: 13px;
+      font-size: 0.95rem;
+      line-height: 1.6;
+      word-break: break-word;
+    }
+    .msg.bot .bubble {
+      background: var(--navy-mid);
+      border: 1px solid var(--border);
+      border-top-left-radius: 4px;
+      color: var(--text);
+    }
+    .msg.user .bubble {
+      background: var(--lime);
+      color: var(--navy);
+      font-weight: 500;
+      border-top-right-radius: 4px;
+    }
+
+    /* markdown inside bot bubbles */
+    .msg.bot .bubble h1, .msg.bot .bubble h2 { color: var(--lime); font-size: 0.95rem; margin: 10px 0 5px; }
+    .msg.bot .bubble h3 { color: var(--text); font-size: 0.88rem; margin: 8px 0 3px; }
+    .msg.bot .bubble ul, .msg.bot .bubble ol { padding-left: 18px; margin: 4px 0; }
+    .msg.bot .bubble li { margin-bottom: 3px; }
+    .msg.bot .bubble strong { color: #fff; }
+    .msg.bot .bubble code { background: var(--navy-light); padding: 1px 5px; border-radius: 4px; font-size: 0.82rem; }
+    .msg.bot .bubble pre  { background: var(--navy-light); padding: 10px; border-radius: 7px; overflow-x: auto; margin: 6px 0; }
+    .msg.bot .bubble p    { margin-bottom: 6px; }
+    .msg.bot .bubble p:last-child { margin-bottom: 0; }
+    .msg.bot .bubble table { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: 0.82rem; }
+    .msg.bot .bubble th, .msg.bot .bubble td { border: 1px solid var(--border); padding: 5px 8px; text-align: left; }
+    .msg.bot .bubble th { background: var(--navy-light); color: var(--lime); }
+    .msg.bot .bubble blockquote { border-left: 3px solid var(--lime); padding-left: 10px; color: var(--text-dim); margin: 6px 0; }
+
+    /* typing indicator */
+    .typing .bubble {
+      display: flex; align-items: center; gap: 5px;
+      padding: 13px 16px;
+    }
+    .dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--lime-dim);
+      animation: bounce 1.2s infinite;
+    }
+    .dot:nth-child(2) { animation-delay: 0.2s; }
+    .dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce {
+      0%, 60%, 100% { transform: translateY(0); }
+      30% { transform: translateY(-5px); }
+    }
+
+    /* ── Input bar ── */
+    .chat-input-row {
+      display: flex;
+      gap: 8px;
+      padding: 12px 14px;
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .chat-input {
+      flex: 1;
+      background: var(--navy-light);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: 10px 14px;
+      color: var(--text);
+      font-size: 0.95rem;
+      outline: none;
+      resize: none;
+      height: 44px;
+      max-height: 110px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      font-family: inherit;
+      line-height: 1.4;
+    }
+    .chat-input::placeholder { color: var(--text-dim); }
+    .chat-input:focus {
+      border-color: var(--lime);
+      box-shadow: 0 0 0 3px var(--lime-glow);
+    }
+
+    .btn-send {
+      width: 44px; height: 44px;
+      background: var(--lime);
+      border: none; border-radius: 9px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      transition: background 0.2s, box-shadow 0.2s, transform 0.1s;
+    }
+    .btn-send:hover:not(:disabled) { background: #ceff00; box-shadow: 0 0 12px var(--lime-glow); }
+    .btn-send:active:not(:disabled) { transform: scale(0.95); }
+    .btn-send:disabled { background: var(--navy-light); cursor: not-allowed; }
+    .btn-send svg { fill: var(--navy); }
+    .btn-send:disabled svg { fill: var(--text-dim); }
+  </style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Header -->
+  <header>
+    <img class="logo" src="/ui/favicon.png" alt="TaskBuddy logo" />
+    <div class="header-text">
+      <h1>TaskBuddy</h1>
+      <p>Your AI-powered academic assistant</p>
+    </div>
+    <div class="header-right">
+      <div class="status-pill" id="statusPill">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusLabel">Connecting...</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Body -->
+  <div class="body">
+
+    <!-- LEFT: Agent panel -->
+    <div class="agent-panel">
+
+      <div class="panel-card">
+        <h2>Agent Workflow</h2>
+        <p>Scans all Canvas courses, extracts deadlines, syncs to Google Calendar, sends a weekly digest email, and generates a personalised study plan.</p>
+        <button class="btn-run" id="btnRun" onclick="runAgent()">
+          <svg class="run-icon" viewBox="0 0 16 16">
+            <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0zm3.5 8.5l-5 3A.5.5 0 0 1 6 11V5a.5.5 0 0 1 .757-.429l5 3a.5.5 0 0 1 0 .858z"/>
+          </svg>
+          Run Agent
+        </button>
+      </div>
+
+      <!-- Status + output (shown while / after running) -->
+      <div class="agent-status" id="agentStatus">
+        <div class="agent-status-label">
+          <div class="pulse-ring" id="pulseRing"></div>
+          <span id="agentStatusText">Running workflow...</span>
+        </div>
+        <div class="agent-output" id="agentOutput"></div>
+      </div>
+
+    </div>
+
+    <!-- RIGHT: Chat panel -->
+    <div class="chat-panel">
+      <div class="chat-header">Ask TaskBuddy</div>
+
+      <div class="chat-messages" id="chatMessages">
+        <div class="msg bot">
+          <div class="avatar">TB</div>
+          <div class="bubble">
+            <p>Hi! Once the agent runs, ask me anything about your courses, deadlines, or study plans — I'll use the content retrieved from Canvas to help you.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-input-row">
+        <textarea class="chat-input" id="chatInput"
+          placeholder="Ask about your courses, deadlines, study plans..."
+          rows="1" onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+        <button class="btn-send" id="btnSend" onclick="sendMessage()">
+          <svg width="18" height="18" viewBox="0 0 20 20"><path d="M2 10l16-8-8 16-2-6-6-2z"/></svg>
+        </button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  const API_BASE = "";
+
+  const chatEl      = document.getElementById("chatMessages");
+  const inputEl     = document.getElementById("chatInput");
+  const btnSend     = document.getElementById("btnSend");
+  const btnRun      = document.getElementById("btnRun");
+  const agentStatus = document.getElementById("agentStatus");
+  const agentOutput = document.getElementById("agentOutput");
+  const pulseRing   = document.getElementById("pulseRing");
+  const statusDot   = document.getElementById("statusDot");
+  const statusPill  = document.getElementById("statusPill");
+  const statusLabel = document.getElementById("statusLabel");
+  const agentStatusText = document.getElementById("agentStatusText");
+
+  let chatBusy = false;
+
+  // configure marked
+  marked.setOptions({ breaks: true, gfm: true });
+
+  // ── health check ──────────────────────────────────────────────────────────
+  async function checkHealth() {
+    try {
+      const r = await fetch(`${API_BASE}/health`);
+      if (r.ok) {
+        statusDot.classList.add("online");
+        statusPill.classList.add("online");
+        statusLabel.textContent = "Online";
+      }
+    } catch (_) {
+      statusLabel.textContent = "Offline";
+    }
+  }
+  checkHealth();
+
+  // ── chat helpers ──────────────────────────────────────────────────────────
+  function appendMsg(role, markdown) {
+    const wrap = document.createElement("div");
+    wrap.className = `msg ${role}`;
+
+    const av = document.createElement("div");
+    av.className = "avatar";
+    av.textContent = role === "bot" ? "TB" : "You";
+
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+
+    if (role === "bot") {
+      bubble.innerHTML = marked.parse(markdown);
+    } else {
+      bubble.textContent = markdown;
+    }
+
+    wrap.appendChild(av);
+    wrap.appendChild(bubble);
+    chatEl.appendChild(wrap);
+    chatEl.scrollTop = chatEl.scrollHeight;
+  }
+
+  function showTyping() {
+    const wrap = document.createElement("div");
+    wrap.className = "msg bot typing";
+    wrap.id = "typing";
+    const av = document.createElement("div");
+    av.className = "avatar";
+    av.textContent = "TB";
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    bubble.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+    wrap.appendChild(av);
+    wrap.appendChild(bubble);
+    chatEl.appendChild(wrap);
+    chatEl.scrollTop = chatEl.scrollHeight;
+  }
+
+  function removeTyping() {
+    const t = document.getElementById("typing");
+    if (t) t.remove();
+  }
+
+  function setChatLocked(state) {
+    chatBusy = state;
+    btnSend.disabled = state;
+    inputEl.disabled = state;
+  }
+
+  function autoResize(el) {
+    el.style.height = "44px";
+    el.style.height = Math.min(el.scrollHeight, 110) + "px";
+  }
+
+  function handleKey(e) {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  }
+
+  // ── send chat message ─────────────────────────────────────────────────────
+  async function sendMessage() {
+    const text = inputEl.value.trim();
+    if (!text || chatBusy) return;
+
+    appendMsg("user", text);
+    inputEl.value = "";
+    autoResize(inputEl);
+    setChatLocked(true);
+    showTyping();
+
+    try {
+      const res = await fetch(`${API_BASE}/ask`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text }),
+      });
+      const data = await res.json();
+      removeTyping();
+      appendMsg("bot", res.ok ? data.response : `**Error:** ${data.detail || "Something went wrong."}`);
+    } catch (err) {
+      removeTyping();
+      appendMsg("bot", "**Error:** Could not reach the server. Is the API running?");
+    } finally {
+      setChatLocked(false);
+      inputEl.focus();
+    }
+  }
+
+  // ── run full agent workflow ───────────────────────────────────────────────
+  async function runAgent() {
+    if (btnRun.disabled) return;
+
+    btnRun.disabled = true;
+    btnRun.classList.add("spinning");
+    agentStatus.classList.add("visible");
+    agentStatusText.textContent = "Running workflow...";
+    pulseRing.style.animationPlayState = "running";
+    agentOutput.textContent = "";
+
+    try {
+      const res = await fetch(`${API_BASE}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message:
+            "Run the full workflow: scan all Canvas courses, save their syllabi and content to Google Drive, " +
+            "extract every assignment and deadline and add them to Google Calendar, " +
+            "generate the upcoming 7-day deadline list, send the weekly bulletin email, " +
+            "and produce a summary and study plan for each course.",
+        }),
+      });
+      const data = await res.json();
+
+      agentStatusText.textContent = res.ok ? "Workflow complete" : "Workflow failed";
+      pulseRing.style.animation = "none";
+
+      agentOutput.innerHTML = res.ok
+        ? marked.parse(data.response)
+        : `<span style="color:#ff6b6b">${data.detail || "Something went wrong."}</span>`;
+
+      agentOutput.scrollTop = 0;
+
+      if (res.ok) {
+        appendMsg("bot", "Agent workflow complete! You can now ask me anything about your courses, deadlines, or study plans.");
+      }
+    } catch (err) {
+      agentStatusText.textContent = "Workflow failed";
+      pulseRing.style.animation = "none";
+      agentOutput.innerHTML = `<span style="color:#ff6b6b">Could not reach the server. Is the API running?</span>`;
+    } finally {
+      btnRun.disabled = false;
+      btnRun.classList.remove("spinning");
+    }
+  }
+</script>
+</body>
+</html>
