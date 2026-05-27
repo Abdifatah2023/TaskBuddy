@@ -1,0 +1,10 @@
+.env
+.git
+.gitignore
+credentials.json
+Calendar_token.json
+drive_token.json
+email_token.json
+__pycache__
+*.pyc
+Syllabi
