@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>TaskBuddy — Sign In</title>
+  <title>TaskBuddy — Get Started</title>
   <link rel="icon" type="image/png" href="/favicon.png" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -16,6 +16,7 @@
       --lime-dim:   #8ab800;
       --text:       #d4e8ff;
       --text-muted: #6b8cae;
+      --error:      #ff6b6b;
     }
 
     body {
@@ -26,113 +27,202 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      padding: 24px;
     }
 
     .card {
       background: var(--navy-card);
       border: 1px solid rgba(182, 240, 0, 0.15);
       border-radius: 16px;
-      padding: 56px 48px;
-      max-width: 420px;
-      width: 90%;
-      text-align: center;
+      padding: 48px 44px;
+      max-width: 460px;
+      width: 100%;
       box-shadow: 0 8px 48px rgba(0,0,0,0.5);
     }
 
     .logo {
-      font-size: 2.4rem;
+      font-size: 2.2rem;
       font-weight: 800;
       letter-spacing: -1px;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
-
     .logo span { color: var(--lime); }
 
     .tagline {
       color: var(--text-muted);
-      font-size: 0.95rem;
-      margin-bottom: 40px;
+      font-size: 0.92rem;
+      margin-bottom: 36px;
       line-height: 1.6;
     }
 
-    .features {
-      list-style: none;
-      text-align: left;
-      margin-bottom: 40px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
+    .field { margin-bottom: 16px; }
 
-    .features li {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 0.9rem;
-      color: var(--text-muted);
-    }
-
-    .features li::before {
-      content: "✓";
-      color: var(--lime);
-      font-weight: 700;
-      flex-shrink: 0;
-    }
-
-    .signin-btn {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 12px;
-      background: #fff;
-      color: #1a1a1a;
-      font-size: 0.95rem;
+    label {
+      display: block;
+      font-size: 0.8rem;
       font-weight: 600;
-      padding: 13px 24px;
-      border-radius: 8px;
-      text-decoration: none;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    input {
       width: 100%;
-      transition: background 0.15s, box-shadow 0.15s;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      background: var(--navy-mid);
+      border: 1px solid rgba(182,240,0,0.15);
+      border-radius: 8px;
+      padding: 11px 14px;
+      color: var(--text);
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input::placeholder { color: var(--text-muted); opacity: 0.6; }
+    input:focus { border-color: rgba(182,240,0,0.5); }
+
+    .hint {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 5px;
+      line-height: 1.4;
+    }
+    .hint a { color: var(--lime); text-decoration: none; }
+    .hint a:hover { text-decoration: underline; }
+
+    .error-msg {
+      background: rgba(255,107,107,0.1);
+      border: 1px solid rgba(255,107,107,0.3);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 0.85rem;
+      color: var(--error);
+      margin-bottom: 16px;
+      display: none;
     }
 
-    .signin-btn:hover {
-      background: #f1f1f1;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    .btn {
+      display: block;
+      width: 100%;
+      background: var(--lime);
+      color: #0a1a00;
+      font-size: 0.95rem;
+      font-weight: 700;
+      padding: 13px 24px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      margin-top: 24px;
+      transition: background 0.15s, opacity 0.15s;
     }
-
-    .signin-btn svg { flex-shrink: 0; }
+    .btn:hover:not(:disabled) { background: var(--lime-dim); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
     .privacy {
       margin-top: 20px;
-      font-size: 0.78rem;
+      font-size: 0.75rem;
       color: var(--text-muted);
+      text-align: center;
+      line-height: 1.5;
     }
+    .privacy a { color: var(--lime); text-decoration: none; }
+    .privacy a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
   <div class="card">
     <div class="logo">Task<span>Buddy</span></div>
-    <p class="tagline">Your AI-powered academic assistant.<br>Sign in to get started.</p>
+    <p class="tagline">Your AI-powered academic assistant.<br>Enter your details to get started.</p>
 
-    <ul class="features">
-      <li>Syncs Canvas assignments to Google Calendar</li>
-      <li>Sends weekly deadline email digests</li>
-      <li>Generates personalised study plans</li>
-      <li>Chat assistant grounded in your course content</li>
-    </ul>
+    <div class="error-msg" id="errorMsg"></div>
 
-    <a href="/auth/login" class="signin-btn">
-      <svg width="20" height="20" viewBox="0 0 48 48">
-        <path fill="#4285F4" d="M44.5 20H24v8.5h11.8C34.7 33.9 30.1 37 24 37c-7.2 0-13-5.8-13-13s5.8-13 13-13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 5.1 29.6 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21c10.5 0 20-7.3 20-21 0-1.4-.2-2.7-.5-4z"/>
-        <path fill="#34A853" d="M6.3 14.7l7 5.1C15 16.1 19.1 13 24 13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 5.1 29.6 3 24 3 16.1 3 9.3 7.9 6.3 14.7z"/>
-        <path fill="#FBBC05" d="M24 45c5.5 0 10.5-1.9 14.4-5l-6.7-5.5C29.7 36.1 27 37 24 37c-6 0-10.6-3.1-11.8-7.5l-7 5.4C8.9 41.4 15.9 45 24 45z"/>
-        <path fill="#EA4335" d="M44.5 20H24v8.5h11.8c-.9 2.8-2.8 5.1-5.3 6.7l6.7 5.5C41.4 37.3 45 31.2 45 24c0-1.4-.2-2.7-.5-4z"/>
-      </svg>
-      Sign in with Google
-    </a>
+    <div class="field">
+      <label for="canvasBaseUrl">Canvas Base URL</label>
+      <input id="canvasBaseUrl" type="url" placeholder="https://canvas.yourschool.edu" autocomplete="off" />
+    </div>
 
-    <p class="privacy">TaskBuddy requests access to your Gmail, Google Calendar, and Google Drive to perform its workflow. Your data is never stored beyond your session. <a href="https://abdifatah2023.github.io/TaskBuddy/privacy.html" target="_blank" style="color:var(--lime);">Privacy Policy</a></p>
+    <div class="field">
+      <label for="canvasToken">Canvas API Token</label>
+      <input id="canvasToken" type="password" placeholder="Paste your Canvas API token" autocomplete="off" />
+      <p class="hint">
+        Generate one in Canvas: <strong>Account → Settings → New Access Token</strong>
+      </p>
+    </div>
+
+    <div class="field">
+      <label for="courseIds">Course IDs <span style="font-weight:400;text-transform:none">(optional)</span></label>
+      <input id="courseIds" type="text" placeholder="e.g. 12345, 67890  (leave blank for all courses)" />
+      <p class="hint">Found in your Canvas course URL: canvas.school.edu/courses/<strong>12345</strong></p>
+    </div>
+
+    <div class="field">
+      <label for="email">Your Email Address</label>
+      <input id="email" type="email" placeholder="you@example.com" />
+      <p class="hint">Where TaskBuddy will send your weekly digest and calendar file.</p>
+    </div>
+
+    <button class="btn" id="loginBtn" onclick="handleLogin()">Get Started</button>
+
+    <p class="privacy">
+      TaskBuddy uses your Canvas token to read course content and sends results to your email.
+      Your data is never stored beyond your session.
+      <a href="https://abdifatah2023.github.io/TaskBuddy/privacy.html" target="_blank">Privacy Policy</a>
+    </p>
   </div>
+
+  <script>
+    async function handleLogin() {
+      const btn      = document.getElementById("loginBtn");
+      const errorEl  = document.getElementById("errorMsg");
+      const url      = document.getElementById("canvasBaseUrl").value.trim();
+      const token    = document.getElementById("canvasToken").value.trim();
+      const ids      = document.getElementById("courseIds").value.trim();
+      const email    = document.getElementById("email").value.trim();
+
+      errorEl.style.display = "none";
+
+      if (!url || !token || !email) {
+        errorEl.textContent = "Please fill in Canvas Base URL, API Token, and Email.";
+        errorEl.style.display = "block";
+        return;
+      }
+
+      btn.textContent = "Connecting…";
+      btn.disabled = true;
+
+      try {
+        const res = await fetch("/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            canvas_base_url: url,
+            canvas_token: token,
+            canvas_course_ids: ids,
+            email: email,
+          }),
+        });
+
+        if (res.ok) {
+          window.location.href = "/";
+        } else {
+          const data = await res.json().catch(() => ({}));
+          errorEl.textContent = data.detail || "Login failed. Check your credentials and try again.";
+          errorEl.style.display = "block";
+          btn.textContent = "Get Started";
+          btn.disabled = false;
+        }
+      } catch (_) {
+        errorEl.textContent = "Could not reach the server. Please try again.";
+        errorEl.style.display = "block";
+        btn.textContent = "Get Started";
+        btn.disabled = false;
+      }
+    }
+
+    // Allow Enter key to submit
+    document.addEventListener("keydown", e => {
+      if (e.key === "Enter") handleLogin();
+    });
+  </script>
 </body>
 </html>

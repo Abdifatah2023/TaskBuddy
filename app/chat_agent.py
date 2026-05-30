@@ -3,25 +3,22 @@ TaskBuddy Chat Agent
 ====================
 Multi-turn chat with tool support:
   - search_course_content       : RAG search over cached course materials
-  - update_assignment_due_date  : Update a Google Calendar event
+  - update_assignment_due_date  : Update the session calendar
   - draft_email                 : Stage an email for user review
-  - send_email                  : Send the staged draft
+  - send_email                  : Send the staged draft via SMTP
   - generate_quiz               : Generate an interactive quiz
 Quiz answers (A/B/C/D) and email "send" confirmations are handled as
 lightweight shortcuts that bypass the LLM call entirely.
 """
 
 import asyncio
-import base64
 import json
 import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from email.message import EmailMessage
 from typing import Optional
 
-from googleapiclient.discovery import build
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -64,12 +61,12 @@ def get_session(session_id: str) -> ChatSession:
 
 
 # ── Chat RAG cache ─────────────────────────────────────────────────────────────
+
 _chat_rag_chain = None
 _chat_rag_cache_keys: frozenset = frozenset()
 
 
 def _ensure_chat_rag() -> bool:
-    """Rebuild the chat RAG chain if new course content is available."""
     global _chat_rag_chain, _chat_rag_cache_keys
     try:
         from app.Agent_setup import _course_content_cache
@@ -107,20 +104,12 @@ def _search_content(query: str) -> str:
         return f"Search error: {e}"
 
 
-def _update_assignment(assignment_name: str, new_due_date: str, credentials) -> str:
-    from app.Google_calendar import GoogleCalendarTool
+def _update_assignment(assignment_name: str, new_due_date: str) -> str:
     from app.Agent_setup import added_events
-    result = GoogleCalendarTool(
-        title=assignment_name,
-        start_time=new_due_date,
-        end_time=new_due_date,
-        credentials=credentials,
-    )
     added_events[:] = [e for e in added_events if e["title"] != assignment_name]
-    if result.startswith(("Event created", "Event updated")):
-        added_events.append({"title": assignment_name, "due_date": new_due_date})
-    log.info("update_assignment: '%s' → %s | %s", assignment_name, new_due_date, result[:60])
-    return result
+    added_events.append({"title": assignment_name, "due_date": new_due_date})
+    log.info("update_assignment: '%s' → %s", assignment_name, new_due_date)
+    return f"Assignment '{assignment_name}' updated to {new_due_date} in the session calendar."
 
 
 def _store_draft(session: ChatSession, to: str, subject: str, body: str) -> str:
@@ -134,25 +123,21 @@ def _store_draft(session: ChatSession, to: str, subject: str, body: str) -> str:
     )
 
 
-def _send_draft(session: ChatSession, credentials) -> str:
+def _send_draft(session: ChatSession) -> str:
     if not session.email_draft:
         return "No email draft found. Please draft an email first."
     draft = session.email_draft
-    try:
-        service = build("gmail", "v1", credentials=credentials)
-        msg = EmailMessage()
-        msg.set_content(draft["body"])
-        msg["To"]      = draft["to"]
-        msg["From"]    = "me"
-        msg["Subject"] = draft["subject"]
-        encoded = base64.urlsafe_b64encode(msg.as_bytes()).decode()
-        service.users().messages().send(userId="me", body={"raw": encoded}).execute()
+    from app.email_alerts import gmail_send_message
+    success = gmail_send_message(
+        email_body=draft["body"],
+        recipient=draft["to"],
+        subject=draft["subject"],
+    )
+    if success:
         session.email_draft = None
         log.info("Email sent to %s | Subject: %s", draft["to"], draft["subject"])
         return f"✅ Email sent successfully to **{draft['to']}**."
-    except Exception as e:
-        log.error("Email send failed: %s", e)
-        return f"Failed to send email: {e}"
+    return "Failed to send email. Please try again."
 
 
 def _generate_quiz(
@@ -247,33 +232,32 @@ def _process_answer(session: ChatSession, answer: str) -> str:
 
 # ── Tool factory ───────────────────────────────────────────────────────────────
 
-def _make_tools(session_id: str, agent_context: str, credentials, user_email: str) -> list:
-    """Return LangChain tools with session state and credentials captured via closures."""
+def _make_tools(session_id: str, agent_context: str, user_email: str) -> list:
     session = get_session(session_id)
 
     @tool
     def search_course_content(query: str) -> str:
-        """Search course materials, syllabi, assignments, and study plans for relevant information. Use this any time the user asks about course content, topics, or deadlines."""
+        """Search course materials, syllabi, assignments, and study plans for relevant information."""
         return _search_content(query)
 
     @tool
     def update_assignment_due_date(assignment_name: str, new_due_date: str) -> str:
-        """Update the due date of an assignment in Google Calendar. new_due_date must be in YYYY-MM-DD format. Use this when the user asks to change or reschedule an assignment."""
-        return _update_assignment(assignment_name, new_due_date, credentials)
+        """Update the due date of an assignment in the session calendar. new_due_date must be YYYY-MM-DD."""
+        return _update_assignment(assignment_name, new_due_date)
 
     @tool
     def draft_email(recipient_email: str, subject: str, body: str) -> str:
-        """Create an email draft for the user to review before sending. Always use this before send_email — never send without showing the draft first."""
+        """Create an email draft for the user to review before sending."""
         return _store_draft(session, recipient_email, subject, body)
 
     @tool
     def send_email(_: str = "") -> str:
-        """Send the email that was previously drafted. Only call this after the user has explicitly confirmed they want to send the draft."""
-        return _send_draft(session, credentials)
+        """Send the email that was previously drafted. Only call after the user has explicitly confirmed."""
+        return _send_draft(session)
 
     @tool
     def generate_quiz(course_name: str, topic: str, num_questions: int = 5) -> str:
-        """Generate an interactive multiple-choice quiz on a topic from a course. The user will answer questions one at a time. num_questions defaults to 5."""
+        """Generate an interactive multiple-choice quiz on a topic from a course."""
         return _generate_quiz(session, course_name, topic, num_questions, agent_context)
 
     return [search_course_content, update_assignment_due_date, draft_email, send_email, generate_quiz]
@@ -285,17 +269,11 @@ async def run_chat_turn(
     session_id: str,
     message: str,
     agent_context: str,
-    credentials,
     user_email: str,
 ) -> str:
-    """
-    Process one chat message with full tool-calling support and conversation history.
-    Returns the assistant's response as a markdown string.
-    """
     session = get_session(session_id)
     stripped = message.strip()
 
-    # ── Quiz answer shortcut (no LLM needed) ─────────────────────────────────
     if (
         session.quiz
         and session.quiz.current < len(session.quiz.questions)
@@ -307,17 +285,15 @@ async def run_chat_turn(
         session.history.append(AIMessage(content=response))
         return response
 
-    # ── Email send confirmation shortcut ─────────────────────────────────────
     if (
         session.email_draft
         and re.search(r"\b(send(\s+it)?|confirm|yes|go\s+ahead)\b", stripped, re.I)
     ):
-        response = _send_draft(session, credentials)
+        response = _send_draft(session)
         session.history.append(HumanMessage(content=message))
         session.history.append(AIMessage(content=response))
         return response
 
-    # ── Build system prompt ───────────────────────────────────────────────────
     now = datetime.now()
     system_content = (
         "You are TaskBuddy, an AI-powered academic assistant.\n"
@@ -325,7 +301,7 @@ async def run_chat_turn(
         f"The user's email address is: {user_email}\n\n"
         "## Available tools\n"
         "- **search_course_content**: search syllabi, modules, assignments, and study plans.\n"
-        "- **update_assignment_due_date**: reschedule an assignment on Google Calendar.\n"
+        "- **update_assignment_due_date**: reschedule an assignment in the session calendar.\n"
         "- **draft_email**: create an email draft for user review.\n"
         "- **send_email**: send the confirmed draft.\n"
         "- **generate_quiz**: create an interactive quiz (quiz answers are handled automatically).\n\n"
@@ -339,12 +315,10 @@ async def run_chat_turn(
     if agent_context:
         system_content += f"\n## Agent summary (reference)\n{agent_context[:1500]}\n"
 
-    # ── Assemble messages ─────────────────────────────────────────────────────
     session.history.append(HumanMessage(content=message))
     messages = [SystemMessage(content=system_content)] + session.history[-20:]
 
-    # ── LLM call with tools ───────────────────────────────────────────────────
-    tools    = _make_tools(session_id, agent_context, credentials, user_email)
+    tools    = _make_tools(session_id, agent_context, user_email)
     tool_map = {t.name: t for t in tools}
     llm      = ChatGoogleGenerativeAI(model="gemini-2.0-flash").bind_tools(tools)
 
@@ -371,7 +345,6 @@ async def run_chat_turn(
         final_response = await asyncio.to_thread(synthesis_llm.invoke, final_messages)
         answer = final_response.content
 
-    # ── Update history ────────────────────────────────────────────────────────
     session.history.append(AIMessage(content=answer))
     if len(session.history) > _HISTORY_LIMIT:
         session.history = session.history[-_HISTORY_LIMIT:]

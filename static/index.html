@@ -291,7 +291,7 @@
         <span id="statusLabel">Connecting...</span>
       </div>
       <span id="userEmail" style="font-size:0.8rem;color:var(--text-muted);margin-left:12px;"></span>
-      <a href="/auth/logout" id="signOutBtn" style="display:none;font-size:0.8rem;color:var(--lime);text-decoration:none;margin-left:12px;border:1px solid rgba(182,240,0,0.3);padding:4px 10px;border-radius:6px;">Sign out</a>
+      <a href="/logout" id="signOutBtn" style="display:none;font-size:0.8rem;color:var(--lime);text-decoration:none;margin-left:12px;border:1px solid rgba(182,240,0,0.3);padding:4px 10px;border-radius:6px;">Sign out</a>
     </div>
   </header>
 
@@ -304,13 +304,17 @@
       <!-- Workflow card -->
       <div class="panel-card">
         <h2>Agent Workflow</h2>
-        <p>Scans Canvas courses, extracts deadlines, syncs to Google Calendar, sends a weekly digest, and generates study plans.</p>
+        <p>Scans Canvas courses, extracts deadlines, emails a weekly digest with an .ics calendar file, and generates study plans.</p>
         <div class="btn-run-row">
           <button class="btn-run" id="btnRun" onclick="runAgent()">
             <svg class="run-icon" viewBox="0 0 16 16">
               <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0zm3.5 8.5l-5 3A.5.5 0 0 1 6 11V5a.5.5 0 0 1 .757-.429l5 3a.5.5 0 0 1 0 .858z"/>
             </svg>
             Run Agent
+          </button>
+          <button class="btn-download" id="btnDownload" onclick="downloadCourses()" title="Download course content as ZIP" style="display:none;">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/></svg>
+            Download
           </button>
           <button class="btn-reset" id="btnReset" onclick="resetAgent()" title="Reset agent state">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/><path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/></svg>
@@ -324,7 +328,7 @@
       <div class="panel-card" id="stepCard" style="display:none">
         <div class="step-tracker">
           <div class="step-counter-row">
-            <div class="step-counter">Step <strong id="stepNum">—</strong> / 7</div>
+            <div class="step-counter">Step <strong id="stepNum">—</strong> / 6</div>
             <div class="step-done-badge" id="stepDoneBadge">✓ Complete</div>
           </div>
           <div class="step-current" id="stepCurrent">
@@ -502,11 +506,16 @@
   let _prevStepIdx = -1;
 
   const STEP_NAMES = [
-    "Discovering courses", "Saving to Drive", "Extracting assignments",
-    "Adding to Calendar", "Filtering deadlines", "Sending email", "Generating study plans",
+    "Discovering courses", "Extracting assignments",
+    "Adding to calendar", "Filtering deadlines", "Sending email", "Generating study plans",
   ];
 
   marked.setOptions({ breaks: true, gfm: true });
+
+  // ── Course content download ───────────────────────────────────────────────────
+  function downloadCourses() {
+    window.open(`${API_BASE}/download/courses`, "_blank");
+  }
 
   // ── Health check ─────────────────────────────────────────────────────────────
   async function checkHealth() {
@@ -759,6 +768,7 @@
         _summaryMarkdown = data.summary;
         outputPreview.innerHTML = marked.parse(data.summary);
         btnExpand.style.display = "block";
+        document.getElementById("btnDownload").style.display = "inline-flex";
       }
       renderCourseCards(data.courses);
       await loadCalendarEvents();
@@ -873,6 +883,7 @@
           _summaryMarkdown = job.result;
           outputPreview.innerHTML = marked.parse(job.result);
           btnExpand.style.display = "block";
+          document.getElementById("btnDownload").style.display = "inline-flex";
 
           const sr = await fetch(`${API_BASE}/status`);
           if (sr.ok) {

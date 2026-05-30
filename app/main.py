@@ -1,17 +1,18 @@
+import asyncio
+import io
 import os
 import uuid
-import asyncio
+import zipfile
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
+from pydantic import BaseModel
 from dotenv import load_dotenv
 
-from app.Agent_setup import build_agent, reset_progress, ProgressTracker, _step_progress, _courses_data, added_events
-from app.Google_calendar import get_taskbuddy_events
+from app.Agent_setup import build_agent, reset_progress, ProgressTracker, _step_progress, _courses_data, added_events, _course_content_cache
 from app.chat_agent import run_chat_turn, _sessions
 import app.auth as auth
 
@@ -26,15 +27,11 @@ _jobs: dict[str, dict] = {}
 app = FastAPI(
     title="TaskBuddy Agent API",
     description="An AI-powered academic support agent",
-    version="1.0.0",
+    version="2.0.0",
 )
 
 
 # ── Auth helpers ──────────────────────────────────────────────────────────────
-
-def _redirect_uri(request: Request) -> str:
-    return f"{BASE_URL}/auth/callback"
-
 
 def _get_session(request: Request) -> dict | None:
     session_id = request.cookies.get("taskbuddy_session")
@@ -50,32 +47,41 @@ def _require_session(request: Request) -> dict:
 
 # ── Auth endpoints ────────────────────────────────────────────────────────────
 
-@app.get("/auth/login")
-async def login(request: Request):
-    url = auth.build_auth_url(_redirect_uri(request))
-    return RedirectResponse(url=url)
+class LoginRequest(BaseModel):
+    email: str
+    canvas_token: str
+    canvas_base_url: str
+    canvas_course_ids: str = ""
 
 
-@app.get("/auth/callback")
-async def callback(request: Request, code: str):
-    try:
-        credentials = auth.exchange_code(code, _redirect_uri(request))
-        email = await asyncio.to_thread(auth.get_user_email, credentials)
-        session_id = auth.create_session(credentials, email)
-        response = RedirectResponse(url="/")
-        response.set_cookie(
-            "taskbuddy_session",
-            session_id,
-            httponly=True,
-            samesite="lax",
-            secure=BASE_URL.startswith("https"),
+@app.post("/login")
+async def login(request: Request, body: LoginRequest):
+    valid = await asyncio.to_thread(
+        auth.validate_canvas_token, body.canvas_base_url, body.canvas_token
+    )
+    if not valid:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid Canvas credentials. Check your Base URL and API token.",
         )
-        return response
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"OAuth error: {e}")
+    session_id = auth.create_session(
+        email=body.email,
+        canvas_token=body.canvas_token,
+        canvas_base_url=body.canvas_base_url,
+        canvas_course_ids=body.canvas_course_ids,
+    )
+    response = JSONResponse({"status": "ok"})
+    response.set_cookie(
+        "taskbuddy_session",
+        session_id,
+        httponly=True,
+        samesite="lax",
+        secure=BASE_URL.startswith("https"),
+    )
+    return response
 
 
-@app.get("/auth/logout")
+@app.get("/logout")
 async def logout(request: Request):
     session_id = request.cookies.get("taskbuddy_session")
     if session_id:
@@ -119,12 +125,12 @@ async def health_check():
     return {"status": "ok"}
 
 
-async def _run_agent(job_id: str, message: str, credentials, user_email: str):
+async def _run_agent(job_id: str, message: str, session: dict):
     global _agent_context, _last_run
     reset_progress()
     tracker = ProgressTracker()
     try:
-        agent = build_agent(credentials, user_email)
+        agent = build_agent(session)
         result = await agent.ainvoke(
             {"messages": [HumanMessage(content=message)]},
             config={"callbacks": [tracker], "recursion_limit": 100},
@@ -141,9 +147,7 @@ async def chat(request: Request, body: ChatRequest, background_tasks: Background
     session = _require_session(request)
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {"status": "running", "result": None}
-    background_tasks.add_task(
-        _run_agent, job_id, body.message, session["credentials"], session["email"]
-    )
+    background_tasks.add_task(_run_agent, job_id, body.message, session)
     return JobResponse(job_id=job_id)
 
 
@@ -170,9 +174,8 @@ async def get_status(request: Request):
 
 @app.get("/calendar-events")
 async def calendar_events(request: Request):
-    session = _require_session(request)
-    events = await asyncio.to_thread(get_taskbuddy_events, session["credentials"])
-    return {"events": events}
+    _require_session(request)
+    return {"events": [{"title": e["title"], "due_date": e["due_date"]} for e in added_events]}
 
 
 @app.post("/ask", response_model=ChatResponse)
@@ -183,12 +186,33 @@ async def ask(request: Request, body: ChatRequest):
             session_id=body.session_id or "default",
             message=body.message,
             agent_context=_agent_context,
-            credentials=session["credentials"],
             user_email=session["email"],
         )
         return ChatResponse(response=response)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/download/courses")
+async def download_courses(request: Request):
+    _require_session(request)
+    if not _course_content_cache:
+        raise HTTPException(status_code=404, detail="No course content available. Run the agent first.")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for course_id, text in _course_content_cache.items():
+            name = next(
+                (c["course_name"] for c in _courses_data if c["course_id"] == course_id),
+                course_id,
+            )
+            safe = "".join(c if c.isalnum() or c in " _-" else "_" for c in name).strip()
+            zf.writestr(f"{safe}.txt", text)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=course_content.zip"},
+    )
 
 
 @app.post("/reset")
