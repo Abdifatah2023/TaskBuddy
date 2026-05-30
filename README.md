@@ -11,6 +11,8 @@ pinned: false
 
 TaskBuddy is an AI-powered academic assistant that automates course management end-to-end. It connects to a Canvas LMS instance, pulls all course content, extracts assignments and deadlines via a RAG pipeline, syncs them to Google Calendar, delivers a weekly email digest, and generates personalised study plans — all exposed through a web UI with a conversational chat interface.
 
+Users sign in with Google, and all Google API operations (Calendar, Gmail, Drive) run under their own credentials for the duration of the session.
+
 ---
 
 ## Table of Contents
@@ -34,60 +36,82 @@ TaskBuddy is an AI-powered academic assistant that automates course management e
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Web Browser (UI)                         │
-│  ┌─────────────────────┐      ┌──────────────────────────────┐  │
-│  │    Agent Panel      │      │        Chat Panel            │  │
-│  │  (run workflow,     │      │  (multi-turn Q&A, quizzes,   │  │
-│  │   step tracker,     │      │   email drafting, assignment  │  │
-│  │   calendar, cards)  │      │   rescheduling)              │  │
-│  └────────┬────────────┘      └──────────────┬───────────────┘  │
-└───────────┼───────────────────────────────────┼─────────────────┘
-            │  POST /chat  (job)                 │  POST /ask
-            │  GET  /result/{job_id}             │
-            ▼                                   ▼
+│  ┌──────────────────┐  ┌─────────────────┐  ┌───────────────┐  │
+│  │  Landing Page    │  │  Agent Panel    │  │  Chat Panel   │  │
+│  │  (sign in)       │  │  (run workflow) │  │  (multi-turn) │  │
+│  └────────┬─────────┘  └────────┬────────┘  └───────┬───────┘  │
+└───────────┼─────────────────────┼────────────────────┼─────────┘
+            │ GET /auth/login     │ POST /chat         │ POST /ask
+            ▼                    ▼                    ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    FastAPI Server (main.py)                      │
-│  Background job queue  │  Session router  │  /calendar-events   │
-└──────────┬─────────────┴────────┬──────────┴──────────────────┘
-           │                      │
-           ▼                      ▼
-┌──────────────────┐   ┌─────────────────────────────────────────┐
-│  LangGraph ReAct │   │           Chat Agent (chat_agent.py)    │
-│  Agent           │   │  Tools: search_course_content,          │
-│  (Agent_setup.py)│   │         update_assignment_due_date,     │
-│                  │   │         draft_email, send_email,        │
-│  8-step workflow │   │         generate_quiz                   │
-└──────┬───────────┘   └──────────────────┬──────────────────────┘
-       │                                  │
-       ▼                                  ▼
-┌──────────────────────────────────────────────────────────────┐
-│                   External Services                           │
-│  Canvas LMS API  │  Google Drive  │  Google Calendar  │ Gmail │
-└──────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌──────────────────────────────┐
-│       RAG Pipeline           │
-│  Gemini Embeddings + Chroma  │
-│  (assignment extraction,     │
-│   study plans, chat Q&A)     │
-└──────────────────────────────┘
+│   OAuth endpoints   │   Background jobs   │   Session router    │
+│   /auth/login       │   /chat → job_id    │   /ask (chat)       │
+│   /auth/callback    │   /result/{job_id}  │   /calendar-events  │
+│   /auth/logout      │   /status           │   /reset            │
+└──────────┬──────────┴────────┬────────────┴────────────────────┘
+           │                   │
+           ▼                   ▼
+┌──────────────────┐  ┌────────────────────────────────────────┐
+│  app/auth.py     │  │  LangGraph ReAct Agent (Agent_setup.py)│
+│  Web OAuth flow  │  │  build_agent(credentials, user_email)  │
+│  Session store   │  │  8-step workflow                       │
+│  (in-memory)     │  └──────────────────────────────────────┬─┘
+└──────────────────┘                                         │
+                                                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   External Services                              │
+│  Canvas LMS API  │  Google Drive  │  Google Calendar  │  Gmail  │
+└─────────────────────────────────────────────────────────────────┘
+                             │
+                             ▼
+                  ┌──────────────────────┐
+                  │     RAG Pipeline      │
+                  │  Gemini Embeddings   │
+                  │  + ChromaDB          │
+                  └──────────────────────┘
 ```
 
 **Data flow summary:**
-The UI triggers the agent via `POST /chat`, which starts a background job. The LangGraph ReAct agent calls its tools in a fixed order, each tool invoking one or more external services. Progress is polled by the UI via `GET /result/{job_id}`. Once the agent completes, its final summary is stored server-side and passed as context to every subsequent `/ask` chat request.
+
+1. User visits `/landing.html` and clicks "Sign in with Google".
+2. OAuth redirects through `/auth/login` → Google consent → `/auth/callback`, which creates a server-side session and sets an `HttpOnly` cookie.
+3. The main UI (`/`) reads the cookie, fetches `/config` to get the user's email, and displays it in the header.
+4. The UI triggers the agent via `POST /chat`, which starts a background job using the session's Google credentials. Progress is polled via `GET /result/{job_id}`.
+5. All Gmail, Calendar, and Drive operations run under the authenticated user's OAuth token for that session.
 
 ---
 
 ## 2. System Components
 
+### `app/auth.py` — Authentication & Session Management
+
+Handles the Google web OAuth 2.0 flow and maintains server-side sessions.
+
+| Function | Purpose |
+|---|---|
+| `build_auth_url(redirect_uri)` | Builds the Google consent URL with all required scopes |
+| `exchange_code(code, redirect_uri)` | Exchanges the one-time auth code for OAuth credentials |
+| `get_user_email(credentials)` | Calls Gmail `users().getProfile()` to fetch the authenticated email |
+| `create_session(credentials, email)` | Stores credentials + email in the in-memory session store, returns a UUID session ID |
+| `get_session(session_id)` | Returns `{credentials, email}` dict or `None` |
+| `delete_session(session_id)` | Removes session on logout |
+
+**Scopes requested:** `openid`, `userinfo.email`, `gmail.modify`, `gmail.send`, `calendar.events`, `drive`
+
+**Session store:** In-memory `dict[session_id → {credentials, email}]`. Sessions are lost on server restart; users are redirected to sign in again.
+
+---
+
 ### `app/main.py` — FastAPI Application
 
 The entry point and HTTP layer. Responsibilities:
-- Exposes all API endpoints.
+
+- Exposes all API and auth endpoints.
 - Manages an in-memory job store (`_jobs`) mapping `job_id → {status, result}`.
 - Runs the agent as a FastAPI `BackgroundTask` so the HTTP response returns immediately.
 - Stores the agent's last output in `_agent_context` and passes it to every chat turn.
-- Exposes a `/reset` endpoint that clears all server-side state and chat sessions.
+- All non-auth endpoints require a valid `taskbuddy_session` cookie (returns 401 otherwise).
 - Serves the static web UI from the `static/` directory at `/`.
 
 Key globals:
@@ -102,11 +126,7 @@ Key globals:
 
 ### `app/Agent_setup.py` — LangGraph ReAct Agent
 
-Defines the main autonomous agent and all workflow tools. Responsibilities:
-- Configures the LangGraph ReAct agent with Gemini 2.0 Flash and 8 tools.
-- Manages progress tracking (`_step_progress`) so the UI can show live step status.
-- Caches course text (`_course_content_cache`) after study plan generation for the chat RAG.
-- Provides `reset_progress()` to clear state between runs.
+Defines the main autonomous agent and all workflow tools. The agent is created per-request via `build_agent(credentials, user_email)` so each run uses the signed-in user's own Google credentials.
 
 Key globals:
 
@@ -133,11 +153,7 @@ Key globals:
 
 ### `app/canvas.py` — Canvas LMS Integration
 
-All Canvas API communication and the four Canvas-facing agent tools. Responsibilities:
-- Authenticates every request with the `CANVAS_API_TOKEN` header.
-- Handles paginated responses via `Link` header navigation.
-- Converts all Canvas UTC timestamps to the configured local timezone to avoid off-by-one date errors.
-- Extracts readable text from pages, assignments, quizzes, and text files for RAG ingestion.
+All Canvas API communication and the four Canvas-facing agent tools.
 
 Key internal helpers:
 
@@ -169,58 +185,41 @@ All chains share the same embedding model (`gemini-embedding-001`) and text spli
 
 ### `app/Google_calendar.py` — Google Calendar Integration
 
-Manages authentication and all Calendar API operations.
+Accepts the user's `credentials` object (passed from the session) and manages all Calendar API operations.
 
 | Function | Purpose |
 |---|---|
-| `_load_creds()` | Loads and refreshes OAuth credentials from token file. Handles token path differences between local and hosted deployments. |
-| `parse_datetime(dt_string, default_hour=23)` | Parses Canvas/ISO date strings and returns a timezone-aware local datetime. Handles plain dates (sets to 23:00 local), naive datetimes, and UTC-aware datetimes (converts to local). |
-| `find_event_by_title(service, title)` | Searches 6 months back to 12 months forward for a TaskBuddy-owned event matching the title. Used for upsert logic. |
-| `GoogleCalendarTool(title, start_time, end_time)` | **Upsert**: creates the event if missing, updates it if the date changed, skips if already correct. Writes events in the local timezone. |
-| `get_taskbuddy_events()` | Returns all TaskBuddy-created events in the Calendar (identified by `"TaskBuddy"` in the event description) for the `/calendar-events` endpoint. |
-
-**Upsert logic detail:**
-
-```
-find_event_by_title()
-    ├── Not found  →  Create new event with 24h and 1h popup reminders
-    ├── Found, same date  →  Skip (idempotent)
-    └── Found, different date  →  Update event in place (preserves event ID and other fields)
-```
+| `parse_datetime(dt_string, default_hour=23)` | Parses Canvas/ISO date strings and returns a timezone-aware local datetime. |
+| `find_event_by_title(service, title)` | Searches 6 months back to 12 months forward for a TaskBuddy-owned event matching the title. |
+| `GoogleCalendarTool(title, start_time, end_time, credentials)` | Upsert: create / update / skip based on whether the event already exists at the correct date. |
+| `get_taskbuddy_events(credentials)` | Returns all TaskBuddy-created events in the Calendar for the `/calendar-events` endpoint. |
 
 ---
 
-### `app/google_drive.py` — Google Drive Authentication
+### `app/google_drive.py` — Google Drive
 
-Minimal module providing Drive credentials and a service client. `FOLDER_ID` reads from the `DRIVE_FOLDER_ID` environment variable (falls back to the hardcoded default) and points to the parent Drive folder where all course subfolders are created.
+Minimal module: `FOLDER_ID` from `DRIVE_FOLDER_ID` env var and `get_drive_service(credentials)` that builds the Drive v3 client from the session credentials.
 
 ---
 
 ### `app/drive_upload_utils.py` — Drive File Utilities
 
-Two helpers used by `save_canvas_course_to_drive`:
-
 | Function | Purpose |
 |---|---|
 | `get_or_create_folder(service, folder_name, parent_id)` | Returns the folder ID if it already exists under the parent, otherwise creates it. |
-| `upload_text_file(service, folder_id, file_name, text)` | Upserts a text file: updates if it already exists in the folder, creates it otherwise. |
+| `upload_text_file(service, folder_id, file_name, text)` | Upserts a text file: updates if it already exists, creates it otherwise. |
 
 ---
 
 ### `app/email_alerts.py` — Gmail Integration
 
-Provides Gmail authentication and the send function used by the weekly bulletin tool.
-
-| Function | Purpose |
-|---|---|
-| `authenticate()` | OAuth flow for Gmail. Reads token from `/etc/secrets/email_token.json` on hosted platforms, `email_token.json` locally. |
-| `gmail_send_message(creds, email_body)` | Constructs and sends a plain-text email to the address set in `RECIPIENT_EMAIL`. Used by `send_weekly_calendar_bulletin`. |
+`gmail_send_message(credentials, email_body, recipient)` — constructs and sends a plain-text email using the signed-in user's Gmail account via the Gmail API.
 
 ---
 
 ### `app/chat_agent.py` — Chat Agent
 
-Multi-turn conversational assistant with tool-calling support. Maintains per-session state and implements four capabilities on top of the base LLM.
+Multi-turn conversational assistant with tool-calling support. Accepts the session's `credentials` and `user_email` so all operations run under the authenticated user.
 
 **Session state (`ChatSession`):**
 
@@ -233,14 +232,6 @@ Multi-turn conversational assistant with tool-calling support. Maintains per-ses
 **Shortcuts (bypass LLM entirely):**
 - **Quiz answer** — If a quiz is active and the message matches `[A/B/C/D]`, the answer is processed directly without an LLM call.
 - **Email confirmation** — If an email draft is staged and the message contains "send", "confirm", "yes", or "go ahead", the email is sent directly.
-
-**Two-round tool call loop:**
-1. First LLM call with tools bound — may return direct text or a list of tool calls.
-2. If tool calls are present, each tool is invoked, results collected as `ToolMessage` objects.
-3. Second LLM call (no tools bound) synthesizes the tool results into a final response.
-
-**Chat RAG lazy rebuild (`_ensure_chat_rag`):**
-Compares the current keys of `_course_content_cache` (populated by the agent after study plan generation) against a cached `frozenset`. Rebuilds the `chat_rag_chain` only when new course content is available, avoiding re-embedding on every message.
 
 ---
 
@@ -284,353 +275,131 @@ Step 8  Final summary (LLM-generated, self-contained)
         └── Full verbatim study plan text for every course
 ```
 
-**Rules enforced by the agent prompt:**
-- Never hallucinate assignments or due dates.
-- Never call `create_calendar_event` when `due_date` is null.
-- Process one course at a time (no batched tool calls across courses).
-- The final summary must reproduce each study plan in full — never "see above".
-
 ---
 
 ## 4. Agent Tools Reference
 
 ### `list_canvas_courses`
 
-**Module:** `canvas.py`
-**Description:** Discovers all Canvas courses accessible with the configured API token. If `CANVAS_COURSE_IDS` is set in `.env`, only those courses are returned (useful for restricting the agent to specific courses).
+Returns all Canvas courses for the configured token. If `CANVAS_COURSE_IDS` is set, only those are returned.
 
-**Parameters:** None (accepts an ignored `_` string for LangChain compatibility)
-
-**Returns:** JSON array
-```json
-[
-  {"course_id": "12345", "course_name": "Introduction to CS"},
-  {"course_id": "67890", "course_name": "Data Structures"}
-]
-```
+**Returns:** `[{"course_id": "12345", "course_name": "..."}]`
 
 ---
 
 ### `save_canvas_course_to_drive`
 
-**Module:** `canvas.py`
-**Description:** Extracts all readable content from a Canvas course and saves it to Google Drive. Creates a per-course subfolder inside the configured `DRIVE_FOLDER_ID`. Handles upsert — if files already exist from a prior run, they are updated.
-
-**Parameters:**
-
-| Name | Type | Description |
-|---|---|---|
-| `course_id` | `str` | Numeric Canvas course ID |
-| `course_name` | `str` | Human-readable course name (used as folder name) |
-
-**Returns:** JSON object
-```json
-{
-  "course_id": "12345",
-  "course_name": "Introduction to CS",
-  "drive_folder_id": "1AbC...",
-  "files_saved": [
-    {"file": "syllabus.txt", "file_id": "1XyZ..."},
-    {"file": "course_content.txt", "file_id": "2AbC..."}
-  ]
-}
-```
+Extracts syllabus and all module content from a Canvas course and saves them as `syllabus.txt` / `course_content.txt` in a per-course Drive subfolder.
 
 ---
 
 ### `extract_assignments_from_canvas`
 
-**Module:** `canvas.py`
-**Description:** Fetches all course content (syllabus + all module items) and runs it through the assignment-extraction RAG chain. The LLM reads the retrieved chunks and returns every assignment, project, and exam it can identify. This is a semantic extraction — it finds assignments mentioned anywhere in the course text.
+RAG-based semantic extraction: embeds all course content and asks the LLM to find every assignment with its due date.
 
-**Parameters:**
-
-| Name | Type | Description |
-|---|---|---|
-| `course_id` | `str` | Numeric Canvas course ID |
-
-**Returns:** JSON array (or `[]` if no content / chain error)
-```json
-[
-  {"assignment_name": "Homework 1", "due_date": "2026-03-15"},
-  {"assignment_name": "Midterm Exam", "due_date": "2026-03-28"},
-  {"assignment_name": "Final Project", "due_date": null}
-]
-```
+**Returns:** `[{"assignment_name": "...", "due_date": "YYYY-MM-DD or null"}]`
 
 ---
 
 ### `get_canvas_calendar_events`
 
-**Module:** `canvas.py`
-**Description:** Queries the Canvas APIs directly (no RAG) to retrieve assignments and their due dates. Uses two complementary sources merged together: the **Assignments API** (authoritative for all published assignments) and the **Calendar Events API** (supplements with any student-calendar items not in the Assignments API). All UTC due dates are converted to local time.
+Direct API fetch from Canvas Assignments API + Calendar Events API, merged and deduplicated.
 
-**Parameters:**
-
-| Name | Type | Description |
-|---|---|---|
-| `course_id` | `str` | Numeric Canvas course ID |
-
-**Returns:** JSON array
-```json
-[
-  {"assignment_name": "Lab 3", "due_date": "2026-03-20"},
-  {"assignment_name": "Quiz 2", "due_date": "2026-03-22"}
-]
-```
-
-**Why both tools?** `extract_assignments_from_canvas` catches assignments described in pages and syllabi but may miss exact due dates. `get_canvas_calendar_events` has authoritative dates but only covers published assignments. The agent merges both, preferring the API date when both sources agree on a name.
+**Returns:** `[{"assignment_name": "...", "due_date": "YYYY-MM-DD"}]`
 
 ---
 
 ### `create_calendar_event`
 
-**Module:** `Agent_setup.py`
-**Description:** Upserts a Google Calendar event for an assignment. Internally calls `GoogleCalendarTool()` which performs a three-way check: create, update, or skip. Only called when `due_date` is non-null. Also updates the in-session `added_events` list used by the weekly digest tools.
+Upserts a Google Calendar event. Only called when `due_date` is non-null.
 
-**Parameters:**
-
-| Name | Type | Description |
-|---|---|---|
-| `title` | `str` | Assignment name — becomes the event summary |
-| `due_date` | `str` | Due date in `YYYY-MM-DD` format |
-
-**Returns:** One of:
-- `"Event created successfully: <htmlLink>"` — new event
-- `"Event updated successfully: '<title>' moved from <old> to <new>"` — date changed
-- `"Event '<title>' already exists on <date>."` — no change needed
+**Returns:** `"Event created successfully: ..."` / `"Event updated successfully: ..."` / `"Event '...' already exists on ..."`.
 
 ---
 
 ### `extract_weekly_deadlines`
 
-**Module:** `Agent_setup.py`
-**Description:** Filters the `added_events` list (populated by `create_calendar_event` during this run) to only those with a due date within the next 7 days. Pure in-memory operation — no external API calls.
-
-**Parameters:** None
-
-**Returns:** JSON array of upcoming events, or a plain string if none exist
-```json
-[
-  {"title": "Homework 3", "due_date": "2026-04-01"},
-  {"title": "Quiz 2", "due_date": "2026-04-03"}
-]
-```
+Filters `added_events` (in-memory) to those due within the next 7 days.
 
 ---
 
 ### `send_weekly_calendar_bulletin`
 
-**Module:** `Agent_setup.py`
-**Description:** Sends a Gmail bulletin listing the assignments due within the next 7 days that were added by TaskBuddy in this run. If no deadlines fall in the window, the email explicitly says so. Called after `extract_weekly_deadlines`.
-
-**Parameters:** None
-
-**Returns:**
-- `"Success: weekly bulletin email sent."` on success
-- `"Failed with error: <message>"` on failure
-
-**Email format:**
-```
-TaskBuddy — Upcoming Deadlines (Next 7 Days)
-
-- Homework 3  (Due: 2026-04-01)
-- Quiz 2      (Due: 2026-04-03)
-```
+Sends a Gmail bulletin to the signed-in user's email address listing upcoming deadlines.
 
 ---
 
 ### `generate_study_plan`
 
-**Module:** `Agent_setup.py`
-**Description:** Fetches all course content, caches it for the chat RAG, builds the study plan RAG chain, and asks the LLM to produce a structured course summary and week-by-week study plan. The cache update is the mechanism that activates course-grounded Q&A in the chat panel.
-
-**Parameters:**
-
-| Name | Type | Description |
-|---|---|---|
-| `course_id` | `str` | Numeric Canvas course ID |
-| `course_name` | `str` | Human-readable course name |
-
-**Returns:** Formatted markdown text with two sections:
-```
-## Course Summary
-- Key topic 1
-- Key topic 2
-...
-
-## Study Plan
-### Week 1: ...
-...
-```
+Builds the study plan RAG chain and returns a `## Course Summary` + `## Study Plan` for the course. Also caches course text so the chat agent can answer course-specific questions.
 
 ---
 
 ## 5. Chat Agent
 
-The chat agent (`app/chat_agent.py`) is a separate, stateful assistant that operates after the main agent workflow has run. It uses the agent's final summary as background context and the course content RAG for grounded answers.
+The chat agent (`app/chat_agent.py`) operates after the main agent workflow has run. It uses the agent's final summary as background context and the course content RAG for grounded answers.
 
 ### Tools Available to the Chat Agent
 
-#### `search_course_content`
-
-Performs a semantic search over all cached course materials (syllabi, module pages, assignments, study plans). Automatically rebuilds the RAG index when new course content is available. Returns a detailed answer grounded in retrieved chunks.
-
-**When the LLM calls it:** Any question about course topics, assignment details, deadlines, or study plan content.
-
----
-
-#### `update_assignment_due_date`
-
-Reschedules an existing Google Calendar event by calling `GoogleCalendarTool()` with a new date. Also updates the in-session `added_events` list for consistency.
-
-**Parameters:**
-
-| Name | Type | Description |
-|---|---|---|
-| `assignment_name` | `str` | Title of the assignment to reschedule |
-| `new_due_date` | `str` | New date in `YYYY-MM-DD` format |
-
-**Frontend effect:** After a successful reschedule, the UI automatically refreshes the calendar panel by detecting calendar-related keywords in the response.
-
----
-
-#### `draft_email`
-
-Stores an email draft in the session and returns it formatted for user review. **Never sends automatically** — always requires explicit user confirmation.
-
-**Parameters:**
-
-| Name | Type | Description |
-|---|---|---|
-| `recipient_email` | `str` | Recipient address |
-| `subject` | `str` | Email subject line |
-| `body` | `str` | Email body text |
-
-**Returns:** A formatted preview ending with: `Reply 'send email' to send it, or tell me what to change.`
-
----
-
-#### `send_email`
-
-Sends the email that was previously stored by `draft_email`. Only called after the user explicitly confirms. Clears the draft from session state on success.
-
-**Confirmation triggers (no LLM needed):** "send", "send it", "confirm", "yes", "go ahead"
-
----
-
-#### `generate_quiz`
-
-Generates a multiple-choice quiz on a topic using the course content RAG as context. The LLM returns a strict JSON array of questions, each with options A–D, the correct answer, and an explanation. The quiz then enters an interactive mode where each answer is processed as a shortcut (no LLM call per answer).
-
-**Parameters:**
-
-| Name | Type | Description |
-|---|---|---|
-| `course_name` | `str` | Name of the course to quiz on |
-| `topic` | `str` | Specific topic within the course |
-| `num_questions` | `int` | Number of questions (default: 5) |
-
-**Quiz flow:**
-```
-generate_quiz called
-    └── LLM generates questions as JSON
-        └── Question 1/N displayed
-            └── User replies A/B/C/D  (shortcut — no LLM)
-                └── Feedback + next question
-                    ...
-                        └── Score summary + full review
-```
-
----
+- **`search_course_content`** — semantic search over cached course materials.
+- **`update_assignment_due_date`** — reschedules an event in Google Calendar.
+- **`draft_email`** — stages an email for user review (never sends automatically).
+- **`send_email`** — sends the confirmed draft.
+- **`generate_quiz`** — generates an interactive multiple-choice quiz; answers bypass the LLM entirely.
 
 ### Chat System Prompt
 
-Every LLM call includes the current date/time and the agent's last summary (truncated to 1500 characters if large). This allows the chat agent to answer deadline questions like "what is due this week?" accurately without re-running the workflow.
+Every LLM call includes the current date/time, the user's email address, and the agent's last summary (truncated to 1500 characters). When drafting emails, the recipient is pre-filled with the user's own address unless they specify otherwise.
 
 ---
 
 ## 6. RAG Pipeline
 
-### Text Splitting
+- **Text splitter:** `RecursiveCharacterTextSplitter` — 1500 token chunks, 500 overlap
+- **Embedding model:** `GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")`
+- **Vector store:** `chromadb.EphemeralClient()` — fully in-memory, no disk persistence
 
-All course content is split with `RecursiveCharacterTextSplitter`:
-- **Chunk size:** 1500 tokens
-- **Chunk overlap:** 500 tokens
-
-The overlap ensures assignments and deadlines that span paragraph boundaries are captured in at least one chunk.
-
-### Embedding Model
-
-`GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")` — shared across all three chains.
-
-### Vector Store
-
-All chains use `chromadb.EphemeralClient()` — fully in-memory, no disk persistence. A new client is created each time a chain is rebuilt, so there is no cross-run contamination.
-
-### Chain Types
-
-| Chain | Prompt goal | Retrieval k |
+| Chain | Retrieval k | Purpose |
 |---|---|---|
-| Assignment extraction | Return ONLY a JSON array `[{assignment_name, due_date}]`, no markdown | 5 |
-| Study plan | Return `## Course Summary` (3-5 bullets) + `## Study Plan` (week-by-week) | 8 |
-| Chat Q&A | Answer the student's question, be specific, cite details | 6 |
+| Assignment extraction | 5 | Return ONLY a JSON array `[{assignment_name, due_date}]` |
+| Study plan | 8 | Return `## Course Summary` + `## Study Plan` |
+| Chat Q&A | 6 | Answer student questions grounded in retrieved content |
 
 ---
 
 ## 7. API Endpoints
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/health` | Returns `{"status": "ok"}` — health probe |
-| `POST` | `/chat` | Starts the agent workflow as a background job. Returns `{job_id}` immediately. |
-| `GET` | `/result/{job_id}` | Polls job status. Returns `{status, result, progress}`. Status: `running` / `done` / `error`. |
-| `GET` | `/status` | Returns current agent state: `last_run`, `courses`, `deadlines`, `progress`, `summary`. |
-| `GET` | `/calendar-events` | Returns all TaskBuddy-created Google Calendar events: `{events: [{title, due_date}]}`. |
-| `POST` | `/ask` | Runs one chat turn. Returns `{response}`. |
-| `POST` | `/reset` | Clears all server-side state: jobs, agent context, progress, and all chat sessions. |
-| `GET` | `/` | Serves the static web UI (`static/index.html`). |
+| Method | Path | Auth required | Description |
+|---|---|---|---|
+| `GET` | `/auth/login` | No | Redirects to Google OAuth consent |
+| `GET` | `/auth/callback` | No | Exchanges auth code, sets session cookie, redirects to `/` |
+| `GET` | `/auth/logout` | No | Clears session and cookie, redirects to `/landing.html` |
+| `GET` | `/config` | Yes | Returns `{"email": "user@example.com"}` |
+| `GET` | `/health` | No | Returns `{"status": "ok"}` |
+| `POST` | `/chat` | Yes | Starts the agent workflow. Returns `{job_id}`. |
+| `GET` | `/result/{job_id}` | Yes | Returns `{status, result, progress}`. |
+| `GET` | `/status` | Yes | Returns `{last_run, courses, deadlines, progress, summary}`. |
+| `GET` | `/calendar-events` | Yes | Returns `{events: [{title, due_date}]}`. |
+| `POST` | `/ask` | Yes | Runs one chat turn. Returns `{response}`. |
+| `POST` | `/reset` | Yes | Clears all server-side state. |
+| `GET` | `/` | — | Serves `static/index.html` (redirected to landing if unauthenticated). |
 
-### Request / Response Schemas
-
-```
-POST /chat
-Body: { "message": "run" }          (message content is unused by the agent)
-Response: { "job_id": "uuid" }
-
-GET /result/{job_id}
-Response: {
-  "status": "running" | "done" | "error",
-  "result": "<final summary text or error message>",
-  "progress": [
-    {"name": "Discovering courses", "status": "done"},
-    {"name": "Saving to Drive",     "status": "active"},
-    ...
-  ]
-}
-
-POST /ask
-Body: { "message": "What's due this week?", "session_id": "uuid" }
-Response: { "response": "<markdown string>" }
-
-POST /reset
-Body: (none)
-Response: { "status": "reset" }
-```
-
-**Note on session IDs:** The frontend generates a `session_id` with `crypto.randomUUID()` on first load and stores it in `sessionStorage`. This ensures chat history is preserved across requests within the same browser tab but reset on new tabs.
+**Auth:** Every protected endpoint reads the `taskbuddy_session` cookie and returns `401` if absent or invalid. The frontend redirects to `/landing.html` on 401.
 
 ---
 
 ## 8. Web UI
 
-Served at `/` from `static/index.html`. Single-page application with no framework — plain HTML, CSS, and JavaScript using the `marked.js` library for Markdown rendering.
+### Pages
+
+- **`/landing.html`** — sign-in page with "Sign in with Google" button. Shown to unauthenticated users.
+- **`/` (index.html)** — main application. On load, fetches `/config`; redirects to `/landing.html` if the response is 401. Displays the user's email and a "Sign out" link in the header.
 
 ### Layout
 
 ```
 ┌──────────── Agent Panel (380px) ─────────┬─────── Chat Panel (flex) ──────────┐
-│ [Run Agent]                              │  Message history                    │
+│ [Run Agent]  [Reset]                     │  Message history                    │
 │ Step tracker (live progress)             │                                      │
 │ Agent output preview (scrollable)        │  [Prompt chips]                     │
 │ [View Full Summary]                      │  [Input + Send]                     │
@@ -644,13 +413,11 @@ Served at `/` from `static/index.html`. Single-page application with no framewor
 
 ### Key UI Behaviours
 
-- **Agent run** — Clicking "Run Agent" posts to `/chat`, receives a `job_id`, then polls `/result/{job_id}` every 1.5 seconds until `status !== "running"`. Each poll updates the step tracker and agent output preview.
-- **Step tracker** — Shows one active step at a time with a pulsing dot and fade-in/out transition. Completed steps show a "All steps done" badge.
-- **Course cards** — Rendered from `_courses_data` returned by `/status`. Clicking a card opens a modal that extracts and renders the relevant section from the full summary markdown.
-- **Monthly calendar** — Loads events from `/calendar-events` on page load and after each agent run. Navigable with prev/next buttons. Days with events show lime dots. The expand button opens a full-size modal calendar with event names.
-- **Chat panel** — Sends every message to `/ask` with the session ID. Bot responses are rendered as Markdown. If the response contains calendar-related keywords (`updated`, `rescheduled`, `calendar`, `due date`), the calendar panel refreshes automatically.
-- **Prompt chips** — Quick-start buttons covering all five chat capabilities: deadline lookup, quiz generation, email drafting, assignment rescheduling, and course content search.
-- **Reset button** — Sits inline next to Run Agent. Prompts for confirmation, then calls `POST /reset`, clears all UI panels, wipes chat history, and generates a new session ID. Disabled while an agent run is in progress.
+- **Auth guard** — On load, `fetch('/config')` returns the user's email (200) or 401. On 401, the page redirects to `/landing.html` immediately.
+- **Agent run** — Clicks "Run Agent" → `POST /chat` → polls `GET /result/{job_id}` every 1.5s until done.
+- **Step tracker** — Shows one active step at a time with a pulsing dot.
+- **Calendar panel** — Loads events from `/calendar-events` on load and after each agent run. Refreshes automatically if a chat response mentions rescheduling.
+- **Reset** — Calls `POST /reset`, clears all UI panels, wipes chat history, generates a new session ID.
 
 ---
 
@@ -660,24 +427,23 @@ Served at `/` from `static/index.html`. Single-page application with no framewor
 
 | Variable | Required | Description |
 |---|---|---|
-| `GOOGLE_API_KEY` | Yes | Gemini API key (used for LLM and embeddings) |
+| `GOOGLE_API_KEY` | Yes | Gemini API key (LLM and embeddings) |
+| `GOOGLE_CLIENT_ID` | Yes | OAuth Web Client ID from Google Cloud Console |
+| `GOOGLE_CLIENT_SECRET` | Yes | OAuth Web Client Secret |
 | `CANVAS_API_TOKEN` | Yes | Canvas LMS API token |
 | `CANVAS_BASE_URL` | Yes | Canvas instance URL, e.g. `https://canvas.school.edu` |
+| `BASE_URL` | Yes | Public base URL for OAuth redirect, e.g. `http://127.0.0.1:8000` |
 | `CANVAS_COURSE_IDS` | No | Comma-separated course IDs. If omitted, all active courses are fetched. |
 | `DRIVE_FOLDER_ID` | No | Google Drive parent folder ID. Falls back to the default folder if not set. |
-| `RECIPIENT_EMAIL` | No | Email address for the weekly bulletin. Falls back to the default address if not set. |
 
-### Google OAuth Credentials
+### Google Cloud Console Setup
 
-Three separate OAuth tokens are used (generated automatically on first run via browser flow):
+1. Go to **APIs & Services → Credentials** and create a **Web application** OAuth 2.0 client.
+2. Add your `BASE_URL/auth/callback` to **Authorised redirect URIs** (e.g. `http://127.0.0.1:8000/auth/callback`).
+3. Copy the **Client ID** and **Client Secret** into `.env` as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+4. Enable the following APIs: Gmail API, Google Calendar API, Google Drive API.
 
-| Token file | API | Scope |
-|---|---|---|
-| `Calendar_token.json` | Google Calendar | `calendar.events` |
-| `drive_token.json` | Google Drive | `drive` (full) |
-| `email_token.json` | Gmail | `gmail.modify`, `gmail.send` |
-
-All three share one `credentials.json` (OAuth Desktop client). Place `credentials.json` in the project root.
+No token files or `credentials.json` are needed — the app handles the full OAuth flow at runtime.
 
 ### Local Installation
 
@@ -687,13 +453,13 @@ cd TaskBuddy
 pip install -r requirements.txt
 ```
 
-Create `.env` with the variables above, place `credentials.json` in the root, then run:
+Create `.env` with the variables above, then run:
 
 ```bash
 uvicorn app.main:app --reload
 ```
 
-Open **http://127.0.0.1:8000**. On first run, three browser OAuth windows will open (one per Google service) to generate the token files.
+Open **http://127.0.0.1:8000** and sign in with Google. The app will request all necessary permissions on first sign-in.
 
 ---
 
@@ -704,16 +470,16 @@ Open **http://127.0.0.1:8000**. On first run, three browser OAuth windows will o
 | LLM | Gemini 2.0 Flash | — | Agent reasoning, study plans, chat Q&A, quiz generation |
 | Embeddings | Gemini Embedding 001 | — | Vectorising course content for RAG |
 | Agent framework | LangGraph (`langgraph`) | >=1.0.0 | ReAct agent loop (`create_react_agent`) |
-| LLM abstraction | LangChain Core | >=1.2.0 | Tools, messages, callbacks, prompt templates |
+| LLM abstraction | LangChain Core | >=1.2.0 | Tools, messages, callbacks |
 | LLM provider | `langchain-google-genai` | >=4.2.0 | `ChatGoogleGenerativeAI`, `GoogleGenerativeAIEmbeddings` |
-| Vector store | ChromaDB (`chromadb`) | 1.3.4 | In-memory vector storage for RAG chains |
+| Vector store | ChromaDB (`chromadb`) | 1.3.4 | In-memory vector storage |
 | Text splitting | `langchain-text-splitters` | >=1.0.0 | `RecursiveCharacterTextSplitter` |
 | Community tools | `langchain-community` | >=0.4.0 | `Chroma` vectorstore wrapper |
 | API server | FastAPI + Uvicorn | latest | HTTP endpoints and background tasks |
-| HTML parsing | BeautifulSoup4 | latest | Stripping HTML from Canvas page bodies |
-| HTTP client | Requests | latest | All Canvas API calls |
+| HTML parsing | BeautifulSoup4 | latest | Stripping HTML from Canvas pages |
+| HTTP client | Requests | latest | Canvas API calls |
 | Google APIs | `google-api-python-client` | 2.188.0 | Drive, Calendar, Gmail API clients |
-| Google Auth | `google-auth`, `google-auth-oauthlib` | 2.48.0 / 1.2.4 | OAuth 2.0 token management |
+| Google Auth | `google-auth`, `google-auth-oauthlib` | 2.48.0 / 1.2.4 | OAuth 2.0 web flow |
 | Config | `python-dotenv` | 1.2.1 | `.env` file loading |
 | Markdown | `marked.js` (CDN) | latest | Browser-side Markdown rendering |
 
@@ -725,23 +491,20 @@ Open **http://127.0.0.1:8000**. On first run, three browser OAuth windows will o
 
 TaskBuddy runs on Hugging Face Spaces as a Docker container exposing port 7860.
 
-**How it works:**
-- The `Dockerfile` builds a Python 3.11-slim image and starts the app via `startup.sh`.
-- `startup.sh` reads HF Space secrets (environment variables) and writes them to `/etc/secrets/` as JSON files before starting uvicorn. The app's token-path logic already handles this path automatically.
-
 **Secrets** (set in the Space Settings → Secrets tab):
 
 | Secret name | Content |
 |---|---|
 | `GOOGLE_API_KEY` | Gemini API key |
+| `GOOGLE_CLIENT_ID` | OAuth Web Client ID |
+| `GOOGLE_CLIENT_SECRET` | OAuth Web Client Secret |
 | `CANVAS_API_TOKEN` | Canvas LMS API token |
 | `CANVAS_BASE_URL` | Canvas instance URL |
-| `CREDENTIALS_JSON` | Full contents of `credentials.json` |
-| `CALENDAR_TOKEN` | Full contents of `Calendar_token.json` |
-| `DRIVE_TOKEN` | Full contents of `drive_token.json` |
-| `EMAIL_TOKEN` | Full contents of `email_token.json` |
+| `BASE_URL` | Your Space URL, e.g. `https://moeid25-taskbuddy.hf.space` |
 
-Optional secrets: `CANVAS_COURSE_IDS`, `DRIVE_FOLDER_ID`, `RECIPIENT_EMAIL`.
+Optional secrets: `CANVAS_COURSE_IDS`, `DRIVE_FOLDER_ID`.
+
+**Google Cloud Console:** Add `<BASE_URL>/auth/callback` to the OAuth client's authorised redirect URIs.
 
 **Deploy:**
 ```bash
@@ -749,6 +512,4 @@ git remote add space https://<username>:<HF_TOKEN>@huggingface.co/spaces/<userna
 git push space main
 ```
 
-> **Token refresh note:** Google OAuth tokens auto-refresh to `/tmp/` inside the container. These refreshed tokens are lost on container restart. If authentication starts failing after a restart, copy fresh token file contents into the corresponding HF Secrets.
-
-> **Single instance:** The in-memory job store, progress list, and course cache are process-local. Do not scale beyond one container replica or run with `--workers > 1`.
+> **Single instance:** The in-memory job store, session store, and course cache are process-local. Do not scale beyond one container replica or run with `--workers > 1`.

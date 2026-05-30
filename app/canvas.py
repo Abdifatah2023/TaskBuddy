@@ -326,8 +326,7 @@ def list_canvas_courses(_: str = "") -> str:
     return json.dumps(result)
 
 
-@tool
-def save_canvas_course_to_drive(course_id: str, course_name: str) -> str:
+def save_canvas_course_to_drive(course_id: str, course_name: str, credentials) -> str:
     """
     Extract the syllabus and all course content from a Canvas course and save
     them to a dedicated subfolder inside the configured Google Drive folder.
@@ -337,12 +336,11 @@ def save_canvas_course_to_drive(course_id: str, course_name: str) -> str:
       <course_name>/course_content.txt  — all module content (pages, assignments, quizzes)
 
     Returns a JSON summary with the Drive folder ID and the IDs of saved files.
-    Call this for EACH course returned by list_canvas_courses.
     """
     from app.google_drive import get_drive_service, FOLDER_ID
     from app.drive_upload_utils import get_or_create_folder, upload_text_file
 
-    service = get_drive_service()
+    service = get_drive_service(credentials)
 
     # Sanitise folder name
     safe_name = "".join(

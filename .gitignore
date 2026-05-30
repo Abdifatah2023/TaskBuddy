@@ -1,7 +1,5 @@
 .env
 credentials.json
 /Syllabi
-drive_token.json
-Calendar_token.json
-email_token.json
 /__pycache__
+*.pyc

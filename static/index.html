@@ -280,7 +280,7 @@
 
   <!-- Header -->
   <header>
-    <img class="logo" src="/ui/favicon.png" alt="TaskBuddy logo" />
+    <img class="logo" src="/favicon.png" alt="TaskBuddy logo" />
     <div class="header-text">
       <h1>TaskBuddy</h1>
       <p>Your AI-powered academic assistant</p>
@@ -290,6 +290,8 @@
         <div class="status-dot" id="statusDot"></div>
         <span id="statusLabel">Connecting...</span>
       </div>
+      <span id="userEmail" style="font-size:0.8rem;color:var(--text-muted);margin-left:12px;"></span>
+      <a href="/auth/logout" id="signOutBtn" style="display:none;font-size:0.8rem;color:var(--lime);text-decoration:none;margin-left:12px;border:1px solid rgba(182,240,0,0.3);padding:4px 10px;border-radius:6px;">Sign out</a>
     </div>
   </header>
 
@@ -449,6 +451,17 @@
 
 <script>
   const API_BASE = "";
+
+  // ── Auth guard ────────────────────────────────────────────────────────────────
+  (async () => {
+    try {
+      const r = await fetch(`${API_BASE}/config`);
+      if (r.status === 401) { window.location.href = "/landing.html"; return; }
+      const { email } = await r.json();
+      document.getElementById("userEmail").textContent = email;
+      document.getElementById("signOutBtn").style.display = "inline";
+    } catch (_) { window.location.href = "/landing.html"; }
+  })();
 
   // Persistent session ID — survives page refresh within the same tab
   let _sessionId = sessionStorage.getItem("tb_session_id");

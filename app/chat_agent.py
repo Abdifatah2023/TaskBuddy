@@ -12,13 +12,16 @@ lightweight shortcuts that bypass the LLM call entirely.
 """
 
 import asyncio
+import base64
 import json
 import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
+from email.message import EmailMessage
 from typing import Optional
 
+from googleapiclient.discovery import build
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -104,11 +107,15 @@ def _search_content(query: str) -> str:
         return f"Search error: {e}"
 
 
-def _update_assignment(assignment_name: str, new_due_date: str) -> str:
+def _update_assignment(assignment_name: str, new_due_date: str, credentials) -> str:
     from app.Google_calendar import GoogleCalendarTool
     from app.Agent_setup import added_events
-    result = GoogleCalendarTool(title=assignment_name, start_time=new_due_date, end_time=new_due_date)
-    # Keep in-session event list consistent
+    result = GoogleCalendarTool(
+        title=assignment_name,
+        start_time=new_due_date,
+        end_time=new_due_date,
+        credentials=credentials,
+    )
     added_events[:] = [e for e in added_events if e["title"] != assignment_name]
     if result.startswith(("Event created", "Event updated")):
         added_events.append({"title": assignment_name, "due_date": new_due_date})
@@ -127,18 +134,12 @@ def _store_draft(session: ChatSession, to: str, subject: str, body: str) -> str:
     )
 
 
-def _send_draft(session: ChatSession) -> str:
+def _send_draft(session: ChatSession, credentials) -> str:
     if not session.email_draft:
         return "No email draft found. Please draft an email first."
     draft = session.email_draft
     try:
-        import base64
-        from email.message import EmailMessage
-        from googleapiclient.discovery import build
-        from app.email_alerts import authenticate
-
-        creds = authenticate()
-        service = build("gmail", "v1", credentials=creds)
+        service = build("gmail", "v1", credentials=credentials)
         msg = EmailMessage()
         msg.set_content(draft["body"])
         msg["To"]      = draft["to"]
@@ -161,7 +162,6 @@ def _generate_quiz(
     num_questions: int,
     agent_context: str,
 ) -> str:
-    # Use RAG-retrieved content for the question prompt; fall back to agent context
     context = ""
     if _ensure_chat_rag():
         try:
@@ -247,8 +247,8 @@ def _process_answer(session: ChatSession, answer: str) -> str:
 
 # ── Tool factory ───────────────────────────────────────────────────────────────
 
-def _make_tools(session_id: str, agent_context: str) -> list:
-    """Return LangChain tools with session state captured via closures."""
+def _make_tools(session_id: str, agent_context: str, credentials, user_email: str) -> list:
+    """Return LangChain tools with session state and credentials captured via closures."""
     session = get_session(session_id)
 
     @tool
@@ -259,7 +259,7 @@ def _make_tools(session_id: str, agent_context: str) -> list:
     @tool
     def update_assignment_due_date(assignment_name: str, new_due_date: str) -> str:
         """Update the due date of an assignment in Google Calendar. new_due_date must be in YYYY-MM-DD format. Use this when the user asks to change or reschedule an assignment."""
-        return _update_assignment(assignment_name, new_due_date)
+        return _update_assignment(assignment_name, new_due_date, credentials)
 
     @tool
     def draft_email(recipient_email: str, subject: str, body: str) -> str:
@@ -269,7 +269,7 @@ def _make_tools(session_id: str, agent_context: str) -> list:
     @tool
     def send_email(_: str = "") -> str:
         """Send the email that was previously drafted. Only call this after the user has explicitly confirmed they want to send the draft."""
-        return _send_draft(session)
+        return _send_draft(session, credentials)
 
     @tool
     def generate_quiz(course_name: str, topic: str, num_questions: int = 5) -> str:
@@ -281,7 +281,13 @@ def _make_tools(session_id: str, agent_context: str) -> list:
 
 # ── Public entry point ─────────────────────────────────────────────────────────
 
-async def run_chat_turn(session_id: str, message: str, agent_context: str) -> str:
+async def run_chat_turn(
+    session_id: str,
+    message: str,
+    agent_context: str,
+    credentials,
+    user_email: str,
+) -> str:
     """
     Process one chat message with full tool-calling support and conversation history.
     Returns the assistant's response as a markdown string.
@@ -306,7 +312,7 @@ async def run_chat_turn(session_id: str, message: str, agent_context: str) -> st
         session.email_draft
         and re.search(r"\b(send(\s+it)?|confirm|yes|go\s+ahead)\b", stripped, re.I)
     ):
-        response = _send_draft(session)
+        response = _send_draft(session, credentials)
         session.history.append(HumanMessage(content=message))
         session.history.append(AIMessage(content=response))
         return response
@@ -315,7 +321,8 @@ async def run_chat_turn(session_id: str, message: str, agent_context: str) -> st
     now = datetime.now()
     system_content = (
         "You are TaskBuddy, an AI-powered academic assistant.\n"
-        f"Today is {now.strftime('%A, %B %d, %Y')} and the time is {now.strftime('%I:%M %p')}.\n\n"
+        f"Today is {now.strftime('%A, %B %d, %Y')} and the time is {now.strftime('%I:%M %p')}.\n"
+        f"The user's email address is: {user_email}\n\n"
         "## Available tools\n"
         "- **search_course_content**: search syllabi, modules, assignments, and study plans.\n"
         "- **update_assignment_due_date**: reschedule an assignment on Google Calendar.\n"
@@ -326,6 +333,7 @@ async def run_chat_turn(session_id: str, message: str, agent_context: str) -> st
         "- Always call search_course_content when answering questions about course topics, "
         "assignments, or deadlines to ground your answer in retrieved content.\n"
         "- Always call draft_email BEFORE send_email — never skip the review step.\n"
+        "- When drafting emails, pre-fill the recipient with the user's email address unless they specify otherwise.\n"
         "- Be concise, accurate, and use markdown formatting.\n"
     )
     if agent_context:
@@ -336,7 +344,7 @@ async def run_chat_turn(session_id: str, message: str, agent_context: str) -> st
     messages = [SystemMessage(content=system_content)] + session.history[-20:]
 
     # ── LLM call with tools ───────────────────────────────────────────────────
-    tools    = _make_tools(session_id, agent_context)
+    tools    = _make_tools(session_id, agent_context, credentials, user_email)
     tool_map = {t.name: t for t in tools}
     llm      = ChatGoogleGenerativeAI(model="gemini-2.0-flash").bind_tools(tools)
 
@@ -345,7 +353,6 @@ async def run_chat_turn(session_id: str, message: str, agent_context: str) -> st
     if not first_response.tool_calls:
         answer = first_response.content
     else:
-        # Execute each requested tool
         tool_msgs: list[ToolMessage] = []
         for tc in first_response.tool_calls:
             fn = tool_map.get(tc["name"])
@@ -359,7 +366,6 @@ async def run_chat_turn(session_id: str, message: str, agent_context: str) -> st
                 result = f"Unknown tool: {tc['name']}"
             tool_msgs.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
 
-        # Second LLM call to synthesize tool results into a final response
         synthesis_llm  = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
         final_messages = messages + [first_response] + tool_msgs
         final_response = await asyncio.to_thread(synthesis_llm.invoke, final_messages)

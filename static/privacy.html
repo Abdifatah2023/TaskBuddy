@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TaskBuddy — Privacy Policy</title>
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --navy:      #060d1f;
+      --navy-card: #0f1e3a;
+      --lime:      #b6f000;
+      --text:      #d4e8ff;
+      --text-muted:#6b8cae;
+    }
+
+    body {
+      background: var(--navy);
+      color: var(--text);
+      font-family: "Segoe UI", system-ui, sans-serif;
+      line-height: 1.7;
+      padding: 48px 24px 80px;
+    }
+
+    .container {
+      max-width: 720px;
+      margin: 0 auto;
+    }
+
+    .logo {
+      font-size: 1.6rem;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 4px;
+    }
+    .logo span { color: var(--lime); }
+
+    .back {
+      display: inline-block;
+      margin-bottom: 40px;
+      font-size: 0.85rem;
+      color: var(--lime);
+      text-decoration: none;
+    }
+    .back:hover { text-decoration: underline; }
+
+    h1 {
+      font-size: 1.8rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .updated {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-bottom: 40px;
+    }
+
+    h2 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--lime);
+      margin: 36px 0 10px;
+    }
+
+    p { margin-bottom: 14px; color: var(--text-muted); }
+    p strong { color: var(--text); }
+
+    ul {
+      list-style: none;
+      margin-bottom: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    ul li {
+      color: var(--text-muted);
+      padding-left: 18px;
+      position: relative;
+    }
+
+    ul li::before {
+      content: "–";
+      position: absolute;
+      left: 0;
+      color: var(--lime);
+    }
+
+    a { color: var(--lime); }
+
+    hr {
+      border: none;
+      border-top: 1px solid rgba(182,240,0,0.1);
+      margin: 40px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <div class="logo">Task<span>Buddy</span></div>
+    <a class="back" href="/landing.html">← Back to TaskBuddy</a>
+
+    <h1>Privacy Policy</h1>
+    <p class="updated">Last updated: May 2025</p>
+
+    <p>TaskBuddy is an AI-powered academic assistant that connects to your Canvas LMS account and Google account to help you manage assignments, deadlines, and study plans. This policy explains what data TaskBuddy accesses, how it is used, and how it is protected.</p>
+
+    <h2>1. Who we are</h2>
+    <p>TaskBuddy is an independent academic productivity tool. For questions about this policy, contact: <a href="mailto:abdifatahiid@gmail.com">abdifatahiid@gmail.com</a></p>
+
+    <h2>2. What data we access</h2>
+    <p>When you sign in with Google, TaskBuddy requests the following permissions:</p>
+    <ul>
+      <li><strong>Google account email address</strong> — to identify your session and address emails to you.</li>
+      <li><strong>Gmail (modify and send)</strong> — to send you a weekly deadline digest email to your own address. TaskBuddy never reads your existing emails.</li>
+      <li><strong>Google Calendar (events)</strong> — to create and update calendar events for your Canvas assignment deadlines.</li>
+      <li><strong>Google Drive</strong> — to save a copy of your Canvas course content (syllabi and module text) into a folder in your own Drive for reference.</li>
+    </ul>
+    <p>TaskBuddy also reads content from your Canvas LMS account (course syllabi, module pages, assignments, and quiz descriptions) using a Canvas API token you provide.</p>
+
+    <h2>3. How we use your data</h2>
+    <p>All data accessed by TaskBuddy is used solely to provide the following features:</p>
+    <ul>
+      <li>Extracting assignment deadlines from Canvas and syncing them to your Google Calendar.</li>
+      <li>Sending a weekly email summary of upcoming deadlines to your own Gmail address.</li>
+      <li>Saving course content to your Google Drive for offline reference.</li>
+      <li>Generating personalised study plans and answering questions about your course content using an AI model (Google Gemini).</li>
+    </ul>
+    <p>Your data is <strong>never sold, shared with third parties, or used for advertising</strong>.</p>
+
+    <h2>4. Data retention</h2>
+    <p>TaskBuddy does <strong>not store your data persistently</strong>. All data (credentials, course content, session state) is held in server memory for the duration of your session only and is discarded when the server restarts or when you sign out. No database or persistent file storage is used.</p>
+    <p>Data written to your Google Calendar and Google Drive remains there under your own Google account and is subject to Google's own privacy policy.</p>
+
+    <h2>5. Third-party services</h2>
+    <ul>
+      <li><strong>Google APIs</strong> — Calendar, Gmail, Drive, and OAuth 2.0. Subject to <a href="https://policies.google.com/privacy" target="_blank">Google's Privacy Policy</a>.</li>
+      <li><strong>Google Gemini API</strong> — Used to process course content and generate study plans. Course text is sent to Google's API for this purpose. Subject to <a href="https://ai.google.dev/terms" target="_blank">Google AI Terms</a>.</li>
+      <li><strong>Canvas LMS</strong> — Course data is fetched from your institution's Canvas instance using the API token you provide.</li>
+      <li><strong>Hugging Face Spaces</strong> — The application is hosted on Hugging Face infrastructure. Subject to <a href="https://huggingface.co/privacy" target="_blank">Hugging Face's Privacy Policy</a>.</li>
+    </ul>
+
+    <h2>6. Security</h2>
+    <p>OAuth credentials are stored in server memory only and transmitted over HTTPS. Your Google account password is never seen or stored by TaskBuddy — authentication is handled entirely by Google's OAuth 2.0 system. You can revoke TaskBuddy's access at any time via <a href="https://myaccount.google.com/permissions" target="_blank">Google Account Permissions</a>.</p>
+
+    <h2>7. Your rights</h2>
+    <p>You may sign out at any time using the "Sign out" link in the application header, which immediately invalidates your session. To revoke Google API access, visit <a href="https://myaccount.google.com/permissions" target="_blank">myaccount.google.com/permissions</a> and remove TaskBuddy. To remove course files saved to your Drive, delete the TaskBuddy folder from your Google Drive directly.</p>
+
+    <h2>8. Changes to this policy</h2>
+    <p>We may update this policy as new features are added. The "Last updated" date at the top of this page reflects the most recent revision. Continued use of TaskBuddy after changes constitutes acceptance of the updated policy.</p>
+
+    <hr>
+    <p style="font-size:0.8rem;">© 2025 TaskBuddy. All rights reserved.</p>
+
+  </div>
+</body>
+</html>

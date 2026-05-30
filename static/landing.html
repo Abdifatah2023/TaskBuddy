@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TaskBuddy — Sign In</title>
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --navy:       #060d1f;
+      --navy-mid:   #0d1b35;
+      --navy-card:  #0f1e3a;
+      --lime:       #b6f000;
+      --lime-dim:   #8ab800;
+      --text:       #d4e8ff;
+      --text-muted: #6b8cae;
+    }
+
+    body {
+      background: var(--navy);
+      color: var(--text);
+      font-family: "Segoe UI", system-ui, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .card {
+      background: var(--navy-card);
+      border: 1px solid rgba(182, 240, 0, 0.15);
+      border-radius: 16px;
+      padding: 56px 48px;
+      max-width: 420px;
+      width: 90%;
+      text-align: center;
+      box-shadow: 0 8px 48px rgba(0,0,0,0.5);
+    }
+
+    .logo {
+      font-size: 2.4rem;
+      font-weight: 800;
+      letter-spacing: -1px;
+      margin-bottom: 8px;
+    }
+
+    .logo span { color: var(--lime); }
+
+    .tagline {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      margin-bottom: 40px;
+      line-height: 1.6;
+    }
+
+    .features {
+      list-style: none;
+      text-align: left;
+      margin-bottom: 40px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .features li {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+
+    .features li::before {
+      content: "✓";
+      color: var(--lime);
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .signin-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      background: #fff;
+      color: #1a1a1a;
+      font-size: 0.95rem;
+      font-weight: 600;
+      padding: 13px 24px;
+      border-radius: 8px;
+      text-decoration: none;
+      width: 100%;
+      transition: background 0.15s, box-shadow 0.15s;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+
+    .signin-btn:hover {
+      background: #f1f1f1;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    }
+
+    .signin-btn svg { flex-shrink: 0; }
+
+    .privacy {
+      margin-top: 20px;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">Task<span>Buddy</span></div>
+    <p class="tagline">Your AI-powered academic assistant.<br>Sign in to get started.</p>
+
+    <ul class="features">
+      <li>Syncs Canvas assignments to Google Calendar</li>
+      <li>Sends weekly deadline email digests</li>
+      <li>Generates personalised study plans</li>
+      <li>Chat assistant grounded in your course content</li>
+    </ul>
+
+    <a href="/auth/login" class="signin-btn">
+      <svg width="20" height="20" viewBox="0 0 48 48">
+        <path fill="#4285F4" d="M44.5 20H24v8.5h11.8C34.7 33.9 30.1 37 24 37c-7.2 0-13-5.8-13-13s5.8-13 13-13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 5.1 29.6 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21c10.5 0 20-7.3 20-21 0-1.4-.2-2.7-.5-4z"/>
+        <path fill="#34A853" d="M6.3 14.7l7 5.1C15 16.1 19.1 13 24 13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 5.1 29.6 3 24 3 16.1 3 9.3 7.9 6.3 14.7z"/>
+        <path fill="#FBBC05" d="M24 45c5.5 0 10.5-1.9 14.4-5l-6.7-5.5C29.7 36.1 27 37 24 37c-6 0-10.6-3.1-11.8-7.5l-7 5.4C8.9 41.4 15.9 45 24 45z"/>
+        <path fill="#EA4335" d="M44.5 20H24v8.5h11.8c-.9 2.8-2.8 5.1-5.3 6.7l6.7 5.5C41.4 37.3 45 31.2 45 24c0-1.4-.2-2.7-.5-4z"/>
+      </svg>
+      Sign in with Google
+    </a>
+
+    <p class="privacy">TaskBuddy requests access to your Gmail, Google Calendar, and Google Drive to perform its workflow. Your data is never stored beyond your session. <a href="https://abdifatah2023.github.io/TaskBuddy/privacy.html" target="_blank" style="color:var(--lime);">Privacy Policy</a></p>
+  </div>
+</body>
+</html>
