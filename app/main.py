@@ -1,11 +1,14 @@
 import asyncio
 import io
+import logging
 import os
 import uuid
 import zipfile
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+
+logger = logging.getLogger("taskbuddy")
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from langchain_core.messages import HumanMessage
@@ -35,10 +38,20 @@ app = FastAPI(
 
 def _get_session(request: Request) -> dict | None:
     auth_header = request.headers.get("Authorization", "")
+    cookie_value = request.cookies.get("taskbuddy_session")
+    logger.info(
+        "auth: bearer=%s cookie=%s path=%s",
+        "yes" if auth_header.startswith("Bearer ") else "no",
+        "yes" if cookie_value else "no",
+        request.url.path,
+    )
     if auth_header.startswith("Bearer "):
-        return auth.get_session(auth_header[7:])
-    session_id = request.cookies.get("taskbuddy_session")
-    return auth.get_session(session_id)
+        result = auth.get_session(auth_header[7:])
+        logger.info("bearer decode: %s", "ok" if result else "fail")
+        return result
+    result = auth.get_session(cookie_value)
+    logger.info("cookie decode: %s", "ok" if result else "fail")
+    return result
 
 
 def _require_session(request: Request) -> dict:
@@ -74,12 +87,13 @@ async def login(request: Request, body: LoginRequest):
         canvas_course_ids=body.canvas_course_ids,
     )
     response = JSONResponse({"status": "ok", "token": session_id})
+    is_https = BASE_URL.startswith("https")
     response.set_cookie(
         "taskbuddy_session",
         session_id,
         httponly=True,
-        samesite="lax",
-        secure=BASE_URL.startswith("https"),
+        samesite="none" if is_https else "lax",
+        secure=is_https,
         max_age=86400,  # 24 hours
     )
     return response
