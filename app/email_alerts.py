@@ -11,10 +11,13 @@ import requests
 
 log = logging.getLogger(__name__)
 
-GMAIL_ADDRESS      = os.getenv("GMAIL_ADDRESS", "")
-GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "")
-RESEND_API_KEY     = os.getenv("RESEND_API_KEY", "")
-RESEND_FROM        = os.getenv("RESEND_FROM", "TaskBuddy <onboarding@resend.dev>")
+GMAIL_ADDRESS       = os.getenv("GMAIL_ADDRESS", "")
+GMAIL_APP_PASSWORD  = os.getenv("GMAIL_APP_PASSWORD", "")
+RESEND_API_KEY      = os.getenv("RESEND_API_KEY", "")
+RESEND_FROM         = os.getenv("RESEND_FROM", "TaskBuddy <onboarding@resend.dev>")
+SENDGRID_API_KEY    = os.getenv("SENDGRID_API_KEY", "")
+SENDGRID_FROM_EMAIL = os.getenv("SENDGRID_FROM_EMAIL", "taskbuddy0001@gmail.com")
+SENDGRID_FROM_NAME  = os.getenv("SENDGRID_FROM_NAME", "TaskBuddy")
 
 
 def generate_ics(events: list[dict]) -> bytes:
@@ -46,6 +49,41 @@ def generate_ics(events: list[dict]) -> bytes:
         ]
     lines.append("END:VCALENDAR")
     return "\r\n".join(lines).encode("utf-8")
+
+
+def _send_via_sendgrid(
+    recipient: str,
+    subject: str,
+    body: str,
+    ics_data: bytes | None,
+) -> bool:
+    payload: dict = {
+        "personalizations": [{"to": [{"email": recipient}]}],
+        "from": {"email": SENDGRID_FROM_EMAIL, "name": SENDGRID_FROM_NAME},
+        "subject": subject,
+        "content": [{"type": "text/plain", "value": body}],
+    }
+    if ics_data:
+        payload["attachments"] = [{
+            "content": base64.b64encode(ics_data).decode(),
+            "filename": "assignments.ics",
+            "type": "text/calendar",
+            "disposition": "attachment",
+        }]
+    resp = requests.post(
+        "https://api.sendgrid.com/v3/mail/send",
+        headers={
+            "Authorization": f"Bearer {SENDGRID_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=15,
+    )
+    if resp.status_code == 202:
+        log.info("Email sent via SendGrid to %s", recipient)
+        return True
+    log.error("SendGrid error %s: %s", resp.status_code, resp.text)
+    return False
 
 
 def _send_via_resend(
@@ -128,7 +166,9 @@ def gmail_send_message(
     subject: str = "TaskBuddy — Weekly Deadline Digest",
     ics_data: bytes | None = None,
 ) -> bool:
-    """Send email. Uses Resend (HTTPS) when RESEND_API_KEY is set, else SMTP."""
+    """Send email. Priority: SendGrid → Resend → SMTP (local dev)."""
+    if SENDGRID_API_KEY:
+        return _send_via_sendgrid(recipient, subject, email_body, ics_data)
     if RESEND_API_KEY:
         return _send_via_resend(recipient, subject, email_body, ics_data)
     return _send_via_smtp(recipient, subject, email_body, ics_data)
