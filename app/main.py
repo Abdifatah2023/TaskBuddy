@@ -34,6 +34,9 @@ app = FastAPI(
 # ── Auth helpers ──────────────────────────────────────────────────────────────
 
 def _get_session(request: Request) -> dict | None:
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        return auth.get_session(auth_header[7:])
     session_id = request.cookies.get("taskbuddy_session")
     return auth.get_session(session_id)
 
@@ -70,7 +73,7 @@ async def login(request: Request, body: LoginRequest):
         canvas_base_url=body.canvas_base_url,
         canvas_course_ids=body.canvas_course_ids,
     )
-    response = JSONResponse({"status": "ok"})
+    response = JSONResponse({"status": "ok", "token": session_id})
     response.set_cookie(
         "taskbuddy_session",
         session_id,

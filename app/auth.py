@@ -25,7 +25,7 @@ def _decode(token: str) -> dict | None:
         payload, sig = token.rsplit(".", 1)
         if not hmac.compare_digest(_sign(payload), sig):
             return None
-        return json.loads(base64.urlsafe_b64decode(payload + "=="))
+        return json.loads(base64.urlsafe_b64decode(payload))
     except Exception:
         return None
 

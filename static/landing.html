@@ -171,6 +171,9 @@
   </div>
 
   <script>
+    // Clear any stale auth token on landing page load (handles sign-out)
+    sessionStorage.removeItem("tb_auth");
+
     async function handleLogin() {
       const btn      = document.getElementById("loginBtn");
       const errorEl  = document.getElementById("errorMsg");
@@ -203,6 +206,8 @@
         });
 
         if (res.ok) {
+          const data = await res.json().catch(() => ({}));
+          if (data.token) sessionStorage.setItem("tb_auth", data.token);
           window.location.href = "/";
         } else {
           const data = await res.json().catch(() => ({}));

@@ -291,7 +291,7 @@
         <span id="statusLabel">Connecting...</span>
       </div>
       <span id="userEmail" style="font-size:0.8rem;color:var(--text-muted);margin-left:12px;"></span>
-      <a href="/logout" id="signOutBtn" style="display:none;font-size:0.8rem;color:var(--lime);text-decoration:none;margin-left:12px;border:1px solid rgba(182,240,0,0.3);padding:4px 10px;border-radius:6px;">Sign out</a>
+      <a href="#" id="signOutBtn" onclick="signOut()" style="display:none;font-size:0.8rem;color:var(--lime);text-decoration:none;margin-left:12px;border:1px solid rgba(182,240,0,0.3);padding:4px 10px;border-radius:6px;">Sign out</a>
     </div>
   </header>
 
@@ -456,6 +456,22 @@
 <script>
   const API_BASE = "";
 
+  // ── Bearer token interceptor (for HF Spaces iframe — cookies blocked) ─────────
+  (function () {
+    const _nativeFetch = window.fetch.bind(window);
+    window.fetch = function (input, init) {
+      init = init || {};
+      const token = sessionStorage.getItem("tb_auth");
+      const url = typeof input === "string" ? input : (input && input.url) || "";
+      if (token && (url.startsWith("/") || url.startsWith(window.location.origin))) {
+        init = Object.assign({}, init, {
+          headers: Object.assign({ "Authorization": "Bearer " + token }, init.headers || {}),
+        });
+      }
+      return _nativeFetch(input, init);
+    };
+  })();
+
   // ── Auth guard ────────────────────────────────────────────────────────────────
   (async () => {
     try {
@@ -511,6 +527,12 @@
   ];
 
   marked.setOptions({ breaks: true, gfm: true });
+
+  // ── Sign out ──────────────────────────────────────────────────────────────────
+  function signOut() {
+    sessionStorage.removeItem("tb_auth");
+    window.location.href = "/logout";
+  }
 
   // ── Course content download ───────────────────────────────────────────────────
   function downloadCourses() {
