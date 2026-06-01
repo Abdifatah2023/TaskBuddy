@@ -77,6 +77,7 @@ async def login(request: Request, body: LoginRequest):
         httponly=True,
         samesite="lax",
         secure=BASE_URL.startswith("https"),
+        max_age=86400,  # 24 hours
     )
     return response
 
