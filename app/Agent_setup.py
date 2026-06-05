@@ -9,6 +9,7 @@ from langchain_core.callbacks.base import BaseCallbackHandler
 from langgraph.prebuilt import create_react_agent
 
 import app.RagPipeline as rp
+from app.RagPipeline import _GEMINI_MODEL
 from app.canvas import (
     list_canvas_courses as _list_canvas_courses,
     extract_assignments_from_canvas as _extract_assignments,
@@ -274,7 +275,7 @@ def build_agent(session: dict):
         )
 
     return create_react_agent(
-        model=ChatGoogleGenerativeAI(model="gemini-2.5-flash"),
+        model=ChatGoogleGenerativeAI(model=_GEMINI_MODEL),
         tools=[
             list_canvas_courses,
             extract_assignments_from_canvas,

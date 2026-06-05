@@ -31,9 +31,11 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 log = logging.getLogger(__name__)
 
+_GEMINI_MODEL = "gemini-2.5-flash"
+_llm = ChatGoogleGenerativeAI(model=_GEMINI_MODEL)
+
 
 def _extract_text(content) -> str:
-    """Normalize LLM response content to a plain string (handles list-of-blocks)."""
     if isinstance(content, list):
         return " ".join(
             part["text"] for part in content if isinstance(part, dict) and part.get("type") == "text"
@@ -166,7 +168,7 @@ def _generate_quiz(
     if not context and agent_context:
         context = agent_context[:3000]
 
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+    llm = _llm
     prompt = (
         f'Generate a {num_questions}-question multiple-choice quiz on "{topic}" '
         f'for the course "{course_name}".\n\n'
@@ -328,9 +330,9 @@ async def run_chat_turn(
     session.history.append(HumanMessage(content=message))
     messages = [SystemMessage(content=system_content)] + session.history[-20:]
 
-    tools    = _make_tools(session_id, agent_context, user_email)
+    tools = _make_tools(session_id, agent_context, user_email)
     tool_map = {t.name: t for t in tools}
-    llm      = ChatGoogleGenerativeAI(model="gemini-2.5-flash").bind_tools(tools)
+    llm = _llm.bind_tools(tools)
 
     first_response = await asyncio.to_thread(llm.invoke, messages)
 
@@ -350,7 +352,7 @@ async def run_chat_turn(
                 result = f"Unknown tool: {tc['name']}"
             tool_msgs.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
 
-        synthesis_llm  = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+        synthesis_llm = _llm
         final_messages = messages + [first_response] + tool_msgs
         final_response = await asyncio.to_thread(synthesis_llm.invoke, final_messages)
         answer = _extract_text(final_response.content)
