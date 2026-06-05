@@ -153,7 +153,13 @@ async def _run_agent(job_id: str, message: str, session: dict):
             {"messages": [HumanMessage(content=message)]},
             config={"callbacks": [tracker], "recursion_limit": 100},
         )
-        _agent_context = result["messages"][-1].content
+        raw = result["messages"][-1].content
+        if isinstance(raw, list):
+            _agent_context = " ".join(
+                part["text"] for part in raw if isinstance(part, dict) and part.get("type") == "text"
+            )
+        else:
+            _agent_context = raw
         _last_run = datetime.now().strftime("%Y-%m-%d %H:%M")
         _jobs[job_id] = {"status": "done", "result": _agent_context}
     except Exception as e:

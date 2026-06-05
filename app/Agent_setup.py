@@ -274,7 +274,7 @@ def build_agent(session: dict):
         )
 
     return create_react_agent(
-        model=ChatGoogleGenerativeAI(model="gemini-2.0-flash"),
+        model=ChatGoogleGenerativeAI(model="gemini-2.5-flash"),
         tools=[
             list_canvas_courses,
             extract_assignments_from_canvas,

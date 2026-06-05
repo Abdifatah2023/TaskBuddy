@@ -66,7 +66,7 @@ def build_rag_chain(text: str):
             "question": RunnablePassthrough(),
         }
         | _assignment_prompt
-        | ChatGoogleGenerativeAI(model="gemini-2.0-flash")
+        | ChatGoogleGenerativeAI(model="gemini-2.5-flash")
         | StrOutputParser()
     )
 
@@ -117,7 +117,7 @@ def build_study_plan_chain(text: str):
             "question": RunnablePassthrough(),
         }
         | _study_plan_prompt
-        | ChatGoogleGenerativeAI(model="gemini-2.0-flash")
+        | ChatGoogleGenerativeAI(model="gemini-2.5-flash")
         | StrOutputParser()
     )
 
@@ -157,6 +157,6 @@ def build_chat_rag_chain(text: str):
             "question": RunnablePassthrough(),
         }
         | _chat_qa_prompt
-        | ChatGoogleGenerativeAI(model="gemini-2.0-flash")
+        | ChatGoogleGenerativeAI(model="gemini-2.5-flash")
         | StrOutputParser()
     )

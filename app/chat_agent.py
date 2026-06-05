@@ -31,6 +31,16 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 log = logging.getLogger(__name__)
 
+
+def _extract_text(content) -> str:
+    """Normalize LLM response content to a plain string (handles list-of-blocks)."""
+    if isinstance(content, list):
+        return " ".join(
+            part["text"] for part in content if isinstance(part, dict) and part.get("type") == "text"
+        )
+    return content or ""
+
+
 # ── Session state ──────────────────────────────────────────────────────────────
 
 @dataclass
@@ -156,7 +166,7 @@ def _generate_quiz(
     if not context and agent_context:
         context = agent_context[:3000]
 
-    llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
     prompt = (
         f'Generate a {num_questions}-question multiple-choice quiz on "{topic}" '
         f'for the course "{course_name}".\n\n'
@@ -169,10 +179,10 @@ def _generate_quiz(
         "  }\n]"
     )
     try:
-        raw = llm.invoke([
+        raw = _extract_text(llm.invoke([
             SystemMessage(content="You are a quiz generator. Respond ONLY with a valid JSON array."),
             HumanMessage(content=prompt),
-        ]).content.strip()
+        ]).content).strip()
         raw = re.sub(r"^```[a-z]*\n?", "", raw).rstrip("`").strip()
         questions = json.loads(raw)
         if not isinstance(questions, list) or not questions:
@@ -320,12 +330,12 @@ async def run_chat_turn(
 
     tools    = _make_tools(session_id, agent_context, user_email)
     tool_map = {t.name: t for t in tools}
-    llm      = ChatGoogleGenerativeAI(model="gemini-2.0-flash").bind_tools(tools)
+    llm      = ChatGoogleGenerativeAI(model="gemini-2.5-flash").bind_tools(tools)
 
     first_response = await asyncio.to_thread(llm.invoke, messages)
 
     if not first_response.tool_calls:
-        answer = first_response.content
+        answer = _extract_text(first_response.content)
     else:
         tool_msgs: list[ToolMessage] = []
         for tc in first_response.tool_calls:
@@ -340,10 +350,10 @@ async def run_chat_turn(
                 result = f"Unknown tool: {tc['name']}"
             tool_msgs.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
 
-        synthesis_llm  = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
+        synthesis_llm  = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
         final_messages = messages + [first_response] + tool_msgs
         final_response = await asyncio.to_thread(synthesis_llm.invoke, final_messages)
-        answer = final_response.content
+        answer = _extract_text(final_response.content)
 
     session.history.append(AIMessage(content=answer))
     if len(session.history) > _HISTORY_LIMIT:
