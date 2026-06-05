@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from app.Agent_setup import build_agent, reset_progress, ProgressTracker, _step_progress, _courses_data, added_events, _course_content_cache
-from app.chat_agent import run_chat_turn, _sessions
+from app.chat_agent import run_chat_turn, _sessions, _extract_text
 import app.auth as auth
 
 load_dotenv()
@@ -153,7 +153,7 @@ async def _run_agent(job_id: str, message: str, session: dict):
             {"messages": [HumanMessage(content=message)]},
             config={"callbacks": [tracker], "recursion_limit": 100},
         )
-        _agent_context = result["messages"][-1].content
+        _agent_context = _extract_text(result["messages"][-1].content)
         _last_run = datetime.now().strftime("%Y-%m-%d %H:%M")
         _jobs[job_id] = {"status": "done", "result": _agent_context}
     except Exception as e:
